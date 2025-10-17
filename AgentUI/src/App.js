@@ -1,37 +1,22 @@
 import React, { useState, useRef } from 'react';
-import { 
-    Search, 
-    Bell, 
-    Settings, 
-    User, 
-    Plus, 
-    Filter, 
-    MoreHorizontal,
+import {
+    User,
+    Plus,
     MessageCircle,
-    Upload,
     Send,
     Paperclip,
     X,
-    AlertCircle,
-    Clock,
-    CheckCircle,
-    AlertTriangle,
     Moon,
     Sun,
     Shield,
     Activity,
     Calendar,
-    FileText,
     Loader,
-    GitBranch,
     Server,
-    Database,
     TrendingUp,
     Users,
     Layers,
-    Zap,
-    Edit3,
-    Trash2
+    Zap
 } from 'lucide-react';
 
 // --- Dummy Agent Data ---
@@ -90,8 +75,9 @@ const ChatbotTemplate = () => {
     // ===== LOGO CONFIGURATION =====
     // Replace these URLs with your actual logo image URLs
     // For best results, use transparent PNG images
-    const [lightModeLogo, setLightModeLogo] = useState('https://www.wipro.com/content/dam/wipro/social-icons/wipro_new_logo.svg');
-    const [darkModeLogo, setDarkModeLogo] = useState('https://companieslogo.com/img/orig/WIT.D-91671412.png?t=1739861069');
+    const lightModeLogo = 'https://www.wipro.com/content/dam/wipro/social-icons/wipro_new_logo.svg';
+    const darkModeLogo = 'https://companieslogo.com/img/orig/WIT.D-91671412.png?t=1739861069';
+
     // ==============================
     
     // =================================================================================
