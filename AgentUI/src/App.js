@@ -165,7 +165,7 @@ const ChatbotTemplate = () => {
                 },
                 // The backend will receive a JSON object with the user's message.
                 // You can add more data here if needed (e.g., conversation history).
-                body: JSON.stringify({ message: messageToSend }),
+                body: JSON.stringify({ prompt: messageToSend }),
             });
 
             if (!response.ok) {
