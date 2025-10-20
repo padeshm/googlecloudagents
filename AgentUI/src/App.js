@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
     User,
     Plus,
@@ -18,6 +18,9 @@ import {
     Layers,
     Zap
 } from 'lucide-react';
+import { auth } from './firebase'; // Import the auth instance
+import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "firebase/auth";
+
 
 // --- Dummy Agent Data ---
 const dummyAgents = [
@@ -71,6 +74,7 @@ const dummyAgents = [
 const ChatbotTemplate = () => {
     const [activeTab, setActiveTab] = useState('chatbot');
     const [isDarkMode, setIsDarkMode] = useState(false);
+    const [user, setUser] = useState(null); // Add user state
     
     // ===== LOGO CONFIGURATION =====
     // Replace these URLs with your actual logo image URLs
@@ -121,6 +125,24 @@ const ChatbotTemplate = () => {
 
     const activeAgent = agents.find(a => a.id === currentAgentId);
 
+    // Listen to the Firebase Auth state change
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            setUser(user);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    const handleSignIn = async () => {
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        try {
+            await signInWithPopup(auth, provider);
+        } catch (error) {
+            console.error("Error during sign-in:", error);
+        }
+    };
+  
     // =================================================================================
     // --- AGENT DISPATCHER ---
     // This function acts as the "dispatcher". It does not contain any agent-specific "thinking" logic.
@@ -131,7 +153,7 @@ const ChatbotTemplate = () => {
     // 4. Receive the response and add it to the message list.
     // =================================================================================
     const handleSendMessage = async () => {
-        if (!activeAgent || (currentMessage.trim() === '' && uploadedFiles.length === 0)) {
+        if (!activeAgent || (currentMessage.trim() === '' && uploadedFiles.length === 0) || !user) {
             return;
         }
 
@@ -153,18 +175,14 @@ const ChatbotTemplate = () => {
         setCurrentMessage('');
         setUploadedFiles([]);
 
-        // --- This is where the frontend calls the backend ---
-        // NOTE: For now, this will fail because the endpoint URLs are placeholders.
-        // Once you deploy a backend agent, you will replace the placeholder URL in the agent registry above.
         try {
-            // The 'fetch' API is the standard way to make HTTP requests from the browser.
+            const token = await user.getIdToken();
             const response = await fetch(activeAgent.endpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
                 },
-                // The backend will receive a JSON object with the user's message.
-                // You can add more data here if needed (e.g., conversation history).
                 body: JSON.stringify({ prompt: messageToSend }),
             });
 
@@ -172,13 +190,12 @@ const ChatbotTemplate = () => {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
 
-            // The frontend expects the backend to return a JSON object with a "reply" property.
             const data = await response.json();
 
             const botResponse = {
                 id: Date.now() + 1,
                 type: 'bot',
-                content: data.reply, // <-- The reply from your backend agent
+                content: data.reply,
                 timestamp: new Date().toISOString(),
             };
             
@@ -239,6 +256,22 @@ const ChatbotTemplate = () => {
     const hoverClass = isDarkMode ? 'hover:bg-gray-700/70' : 'hover:bg-gray-100';
 
     const agentMessages = activeAgent ? activeAgent.messages : [];
+
+    if (!user) {
+        return (
+            <div className={`min-h-screen transition-colors duration-300 ${themeClass} flex items-center justify-center`}>
+                <div className="text-center">
+                    <h1 className={`text-3xl font-bold mb-6 ${textClass}`}>Welcome to Google Cloud Agents</h1>
+                    <button
+                        onClick={handleSignIn}
+                        className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                    >
+                        Sign in with Google
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     const AgentTile = ({ agent }) => {
         const Icon = agent.icon;
@@ -406,8 +439,7 @@ const ChatbotTemplate = () => {
                                 {agentMessages.map((message) => (
                                     <div 
                                         key={message.id} 
-                                        className={`flex transition-all duration-300 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-                                    >
+                                        className={`flex transition-all duration-300 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
                                         <div className={`max-w-3xl p-4 rounded-xl shadow-lg animate-fade-in ${
                                             message.type === 'user'
                                                 ? 'bg-blue-600 text-white rounded-br-none'
