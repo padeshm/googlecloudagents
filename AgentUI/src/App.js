@@ -102,7 +102,7 @@ const ChatbotTemplate = () => {
             messages: [
                 { id: 1, type: 'bot', content: "Hello! I am the Google Cloud Helper. How can I assist you with GCP today?", timestamp: new Date().toISOString() }
             ],
-            endpoint: 'https://us-central1-mahle-translation-poc.cloudfunctions.net/googleCloudHelper' 
+            endpoint: 'https://mcp-server-652176787350.us-central1.run.app/execute' 
         },
         {
             id: 'security-triage-alert',
