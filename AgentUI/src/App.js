@@ -128,6 +128,7 @@ const ChatbotTemplate = () => {
     // Listen to the Firebase Auth state change
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (user) => {
+            console.log("Firebase Auth state changed. User:", user);
             setUser(user);
         });
         return () => unsubscribe();
@@ -154,8 +155,13 @@ const ChatbotTemplate = () => {
     // =================================================================================
     const handleSendMessage = async () => {
         if (!activeAgent || (currentMessage.trim() === '' && uploadedFiles.length === 0) || !user) {
+            console.log("handleSendMessage aborted:", { activeAgent, currentMessage, uploadedFiles, user });
             return;
         }
+
+        console.log("--- Starting handleSendMessage ---");
+        console.log("Active User:", user);
+        console.log("Active Agent:", activeAgent);
 
         const userMessage = {
             id: Date.now(),
@@ -176,45 +182,75 @@ const ChatbotTemplate = () => {
         setUploadedFiles([]);
 
         try {
+            console.log("Attempting to get user ID token...");
             const token = await user.getIdToken();
+            console.log("Successfully got ID token:", token);
+
+            const requestBody = { prompt: messageToSend };
+            const requestHeaders = {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            };
+
+            console.log("--- Making fetch request ---");
+            console.log("Endpoint:", activeAgent.endpoint);
+            console.log("Headers:", requestHeaders);
+            console.log("Body:", JSON.stringify(requestBody));
+
+
             const response = await fetch(activeAgent.endpoint, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ prompt: messageToSend }),
+                headers: requestHeaders,
+                body: JSON.stringify(requestBody),
             });
+            
+            console.log("--- Received response from backend ---");
+            console.log("Response Status:", response.status);
+            console.log("Response Status Text:", response.statusText);
+            console.log("Response OK:", response.ok);
+
+            const responseBodyText = await response.text(); // Get response as text to avoid JSON parsing errors
+            console.log("Raw Response Body:", responseBodyText);
+
 
             if (!response.ok) {
+                // Log the detailed error and throw
+                console.error("Fetch response was not ok.", { status: response.status, body: responseBodyText });
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
 
-            const data = await response.json();
+            console.log("Attempting to parse response body as JSON...");
+            const data = JSON.parse(responseBodyText); // Now parse the text
+            console.log("Successfully parsed JSON data:", data);
+
 
             const botResponse = {
                 id: Date.now() + 1,
                 type: 'bot',
-                content: data.response,
+                content: data.response, // Changed from data.reply
                 timestamp: new Date().toISOString(),
             };
             
+            console.log("Adding bot response to UI:", botResponse);
             setAgents(prevAgents => prevAgents.map(agent =>
                 agent.id === currentAgentId ? { ...agent, messages: [...agent.messages, botResponse] } : agent
             ));
 
         } catch (error) {
-            console.error("Error calling backend agent:", error);
+            console.error("--- Error in handleSendMessage catch block ---");
+            console.error("Error object:", error);
+            console.error("Error message:", error.message);
             const errorResponse = {
                 id: Date.now() + 1,
                 type: 'bot',
-                content: `Sorry, I encountered an error trying to connect to my backend. (Error: ${error.message}). Please make sure the endpoint URL is correct and the backend service is running.`,
+                content: `Sorry, I encountered a critical error. Please check the developer console for details. (Error: ${error.message})`,
                 timestamp: new Date().toISOString(),
             };
             setAgents(prevAgents => prevAgents.map(agent =>
                 agent.id === currentAgentId ? { ...agent, messages: [...agent.messages, errorResponse] } : agent
             ));
         } finally {
+            console.log("--- Finished handleSendMessage ---");
             setIsLoading(false);
         }
     };
