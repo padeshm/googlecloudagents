@@ -102,7 +102,7 @@ const ChatbotTemplate = () => {
             messages: [
                 { id: 1, type: 'bot', content: "Hello! I am the Google Cloud Helper. How can I assist you with GCP today?", timestamp: new Date().toISOString() }
             ],
-            endpoint: 'https://mcp-server-652176787350.us-central1.run.app/execute' 
+            endpoint: 'https://mcp-server-backend-652176787350.us-central1.run.app/api/prompt' 
         },
         {
             id: 'security-triage-alert',
@@ -195,7 +195,7 @@ const ChatbotTemplate = () => {
             const botResponse = {
                 id: Date.now() + 1,
                 type: 'bot',
-                content: data.reply,
+                content: data.response,
                 timestamp: new Date().toISOString(),
             };
             
