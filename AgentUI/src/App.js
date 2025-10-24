@@ -18,7 +18,7 @@ import {
     Layers,
     Zap
 } from 'lucide-react';
-import { auth } from './firebase'; // Import the auth instance
+import { auth } from './firebase';
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "firebase/auth";
 
 
@@ -74,26 +74,12 @@ const dummyAgents = [
 const ChatbotTemplate = () => {
     const [activeTab, setActiveTab] = useState('chatbot');
     const [isDarkMode, setIsDarkMode] = useState(false);
-    const [user, setUser] = useState(null); // Add user state
+    const [user, setUser] = useState(null);
+    const [gcpAccessToken, setGcpAccessToken] = useState(null);
     
-    // ===== LOGO CONFIGURATION =====
-    // Replace these URLs with your actual logo image URLs
-    // For best results, use transparent PNG images
     const lightModeLogo = 'https://www.wipro.com/content/dam/wipro/social-icons/wipro_new_logo.svg';
     const darkModeLogo = 'https://companieslogo.com/img/orig/WIT.D-91671412.png?t=1739861069';
 
-    // ==============================
-    
-    // =================================================================================
-    // --- AGENT REGISTRY ---
-    // This is the "Agent Registry" for the frontend. 
-    // To add a new agent to the chat UI, you only need to add a new object here.
-    // - id: A unique string for the agent.
-    // - name: The display name for the agent in the sidebar.
-    // - description: A short description (currently unused, but good for reference).
-    // - messages: The initial messages to display when the agent is selected.
-    // - endpoint: The *CRITICAL* piece. This is the full URL to the agent's backend service (e.g., a Google Cloud Function URL).
-    // =================================================================================
     const [agents, setAgents] = useState([
         {
             id: 'google-cloud-helper',
@@ -111,7 +97,7 @@ const ChatbotTemplate = () => {
             messages: [
                 { id: 1, type: 'bot', content: "Security agent online. Report any suspicious activity or ask for an alert status.", timestamp: new Date().toISOString() }
             ],
-            endpoint: 'https://your-cloud-function-url-goes-here' // <-- TODO: Replace with your real backend URL
+            endpoint: 'https://your-cloud-function-url-goes-here'
         }
     ]);
 
@@ -125,43 +111,49 @@ const ChatbotTemplate = () => {
 
     const activeAgent = agents.find(a => a.id === currentAgentId);
 
-    // Listen to the Firebase Auth state change
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (user) => {
             console.log("Firebase Auth state changed. User:", user);
             setUser(user);
+            if (!user) {
+                setGcpAccessToken(null);
+            }
         });
         return () => unsubscribe();
     }, []);
 
     const handleSignIn = async () => {
         const provider = new GoogleAuthProvider();
+        provider.addScope('https://www.googleapis.com/auth/cloud-platform.read-only');
         provider.setCustomParameters({ prompt: 'select_account' });
+
         try {
-            await signInWithPopup(auth, provider);
+            const result = await signInWithPopup(auth, provider);
+            const credential = GoogleAuthProvider.credentialFromResult(result);
+            if (credential) {
+                const token = credential.accessToken;
+                console.log("Successfully got GCP Access Token:", token);
+                setGcpAccessToken(token);
+            } else {
+                 console.error("Could not get credential from sign-in result.");
+                 setGcpAccessToken(null);
+            }
         } catch (error) {
             console.error("Error during sign-in:", error);
+            setGcpAccessToken(null);
         }
     };
   
-    // =================================================================================
-    // --- AGENT DISPATCHER ---
-    // This function acts as the "dispatcher". It does not contain any agent-specific "thinking" logic.
-    // Its only job is to:
-    // 1. Get the current user message.
-    // 2. Find the active agent's backend URL (the `endpoint`).
-    // 3. Send the message to that URL.
-    // 4. Receive the response and add it to the message list.
-    // =================================================================================
     const handleSendMessage = async () => {
-        if (!activeAgent || (currentMessage.trim() === '' && uploadedFiles.length === 0) || !user) {
-            console.log("handleSendMessage aborted:", { activeAgent, currentMessage, uploadedFiles, user });
+        if (!activeAgent || (currentMessage.trim() === '' && uploadedFiles.length === 0) || !user || !gcpAccessToken) {
+            console.log("handleSendMessage aborted:", { activeAgent, currentMessage, uploadedFiles, user, gcpAccessToken });
+            if (!gcpAccessToken) {
+                alert("Could not send message. GCP Access Token is missing. Please sign in again.");
+            }
             return;
         }
 
         console.log("--- Starting handleSendMessage ---");
-        console.log("Active User:", user);
-        console.log("Active Agent:", activeAgent);
 
         const userMessage = {
             id: Date.now(),
@@ -171,9 +163,10 @@ const ChatbotTemplate = () => {
             timestamp: new Date().toISOString()
         };
 
-        // Add the user's message to the UI immediately
+        const currentHistory = [...activeAgent.messages, userMessage];
+
         setAgents(prevAgents => prevAgents.map(agent =>
-            agent.id === currentAgentId ? { ...agent, messages: [...agent.messages, userMessage] } : agent
+            agent.id === currentAgentId ? { ...agent, messages: currentHistory } : agent
         ));
         
         setIsLoading(true);
@@ -182,21 +175,17 @@ const ChatbotTemplate = () => {
         setUploadedFiles([]);
 
         try {
-            console.log("Attempting to get user ID token...");
-            const token = await user.getIdToken();
-            console.log("Successfully got ID token:", token);
+            const token = gcpAccessToken;
 
-            const requestBody = { prompt: messageToSend };
+            const requestBody = { prompt: messageToSend, history: activeAgent.messages };
             const requestHeaders = {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             };
 
-            console.log("--- Making fetch request ---");
+            console.log("--- Making fetch request with Access Token ---");
             console.log("Endpoint:", activeAgent.endpoint);
             console.log("Headers:", requestHeaders);
-            console.log("Body:", JSON.stringify(requestBody));
-
 
             const response = await fetch(activeAgent.endpoint, {
                 method: 'POST',
@@ -204,46 +193,32 @@ const ChatbotTemplate = () => {
                 body: JSON.stringify(requestBody),
             });
             
-            console.log("--- Received response from backend ---");
-            console.log("Response Status:", response.status);
-            console.log("Response Status Text:", response.statusText);
-            console.log("Response OK:", response.ok);
-
-            const responseBodyText = await response.text(); // Get response as text to avoid JSON parsing errors
+            const responseBodyText = await response.text();
             console.log("Raw Response Body:", responseBodyText);
 
-
             if (!response.ok) {
-                // Log the detailed error and throw
                 console.error("Fetch response was not ok.", { status: response.status, body: responseBodyText });
-                throw new Error(`HTTP error! status: ${response.status}`);
+                let errorMsg = `HTTP error! status: ${response.status}`;
+                try {
+                    const errorJson = JSON.parse(responseBodyText);
+                    errorMsg = errorJson.error || errorMsg;
+                } catch (e) {}
+                throw new Error(errorMsg);
             }
 
-            console.log("Attempting to parse response body as JSON...");
-            const data = JSON.parse(responseBodyText); // Now parse the text
+            const data = JSON.parse(responseBodyText);
             console.log("Successfully parsed JSON data:", data);
 
-
-            const botResponse = {
-                id: Date.now() + 1,
-                type: 'bot',
-                content: data.response, // Changed from data.reply
-                timestamp: new Date().toISOString(),
-            };
-            
-            console.log("Adding bot response to UI:", botResponse);
             setAgents(prevAgents => prevAgents.map(agent =>
-                agent.id === currentAgentId ? { ...agent, messages: [...agent.messages, botResponse] } : agent
+                agent.id === currentAgentId ? { ...agent, messages: data.history } : agent
             ));
 
         } catch (error) {
-            console.error("--- Error in handleSendMessage catch block ---");
-            console.error("Error object:", error);
-            console.error("Error message:", error.message);
+            console.error("--- Error in handleSendMessage catch block ---", error);
             const errorResponse = {
                 id: Date.now() + 1,
                 type: 'bot',
-                content: `Sorry, I encountered a critical error. Please check the developer console for details. (Error: ${error.message})`,
+                content: `Sorry, I encountered a critical error: ${error.message}`,
                 timestamp: new Date().toISOString(),
             };
             setAgents(prevAgents => prevAgents.map(agent =>
@@ -341,18 +316,15 @@ const ChatbotTemplate = () => {
                 <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-6">
                         <div className="flex items-center space-x-3">
-                            {/* Logo Image - automatically switches based on theme */}
                             <img 
                                 src={isDarkMode ? darkModeLogo : lightModeLogo} 
                                 alt="Company Logo" 
                                 className="h-10 w-auto object-contain transition-opacity duration-300"
                                 onError={(e) => {
-                                    // Fallback to Shield icon if image fails to load
                                     e.target.style.display = 'none';
                                     e.target.nextElementSibling.style.display = 'block';
                                 }}
                             />
-                            {/* Fallback Icon (hidden by default, shown only if logo fails) */}
                             <Shield className="w-8 h-8 text-blue-600" style={{ display: 'none' }} />
                             
                             <div>
@@ -400,7 +372,6 @@ const ChatbotTemplate = () => {
             {/* Main Content Area */}
             <main className="flex-1 overflow-hidden p-6">
                 
-                {/* --- Agents Tab Content --- */}
                 {activeTab === 'agents' && (
                     <div className="space-y-6 h-full overflow-y-auto">
                         <h2 className={`text-2xl font-bold ${textClass}`}>Autonomous Agents </h2>
@@ -415,7 +386,6 @@ const ChatbotTemplate = () => {
                     </div>
                 )}
 
-                {/* --- Chatbot Tab Content --- */}
                 {activeTab === 'chatbot' && (
                     <div className="h-full flex rounded-xl overflow-hidden shadow-2xl">
                         {/* Chat Sidebar */}
