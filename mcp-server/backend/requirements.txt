@@ -1,0 +1,6 @@
+Flask
+google-cloud-aiplatform
+gunicorn
+google-cloud-storage
+google-auth
+Flask-Cors
