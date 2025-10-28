@@ -16,11 +16,10 @@ import {
     TrendingUp,
     Users,
     Layers,
-    Zap,
-    LogOut
+    Zap
 } from 'lucide-react';
 import { auth } from './firebase';
-import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "firebase/auth";
+import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "firebase/auth";
 
 
 // --- Dummy Agent Data ---
@@ -77,7 +76,6 @@ const ChatbotTemplate = () => {
     const [isDarkMode, setIsDarkMode] = useState(false);
     const [user, setUser] = useState(null);
     const [gcpAccessToken, setGcpAccessToken] = useState(null);
-    const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     
     const lightModeLogo = 'https://www.wipro.com/content/dam/wipro/social-icons/wipro_new_logo.svg';
     const darkModeLogo = 'https://companieslogo.com/img/orig/WIT.D-91671412.png?t=1739861069';
@@ -114,13 +112,10 @@ const ChatbotTemplate = () => {
     const activeAgent = agents.find(a => a.id === currentAgentId);
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                setUser(user);
-                const token = await user.getIdToken();
-                setGcpAccessToken(token);
-            } else {
-                setUser(null);
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            console.log("Firebase Auth state changed. User:", user);
+            setUser(user);
+            if (!user) {
                 setGcpAccessToken(null);
             }
         });
@@ -133,27 +128,32 @@ const ChatbotTemplate = () => {
         provider.setCustomParameters({ prompt: 'select_account' });
 
         try {
-            await signInWithPopup(auth, provider);
+            const result = await signInWithPopup(auth, provider);
+            const credential = GoogleAuthProvider.credentialFromResult(result);
+            if (credential) {
+                const token = credential.accessToken;
+                console.log("Successfully got GCP Access Token:", token);
+                setGcpAccessToken(token);
+            } else {
+                 console.error("Could not get credential from sign-in result.");
+                 setGcpAccessToken(null);
+            }
         } catch (error) {
             console.error("Error during sign-in:", error);
+            setGcpAccessToken(null);
         }
     };
   
-    const handleSignOut = async () => {
-        try {
-            await signOut(auth);
-        } catch (error) {
-            console.error("Sign out error", error);
-        }
-    };
-
     const handleSendMessage = async () => {
         if (!activeAgent || (currentMessage.trim() === '' && uploadedFiles.length === 0) || !user || !gcpAccessToken) {
+            console.log("handleSendMessage aborted:", { activeAgent, currentMessage, uploadedFiles, user, gcpAccessToken });
             if (!gcpAccessToken) {
-                alert("Your session may have expired. Please sign in again.");
+                alert("Could not send message. GCP Access Token is missing. Please sign in again.");
             }
             return;
         }
+
+        console.log("--- Starting handleSendMessage ---");
 
         const userMessage = {
             id: Date.now(),
@@ -162,15 +162,11 @@ const ChatbotTemplate = () => {
             files: uploadedFiles.map(f => ({ name: f.name, size: f.size })),
             timestamp: new Date().toISOString()
         };
-        
-        const currentHistory = activeAgent.messages.map(m => ({
-            role: m.type === 'bot' ? 'model' : 'user',
-            parts: [{ text: m.content }]
-        }));
 
+        const currentHistory = [...activeAgent.messages, userMessage];
 
         setAgents(prevAgents => prevAgents.map(agent =>
-            agent.id === currentAgentId ? { ...agent, messages: [...agent.messages, userMessage] } : agent
+            agent.id === currentAgentId ? { ...agent, messages: currentHistory } : agent
         ));
         
         setIsLoading(true);
@@ -179,14 +175,17 @@ const ChatbotTemplate = () => {
         setUploadedFiles([]);
 
         try {
-            const token = await user.getIdToken();
-            setGcpAccessToken(token); 
+            const token = gcpAccessToken;
 
-            const requestBody = { prompt: messageToSend, history: currentHistory };
+            const requestBody = { prompt: messageToSend, history: activeAgent.messages };
             const requestHeaders = {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             };
+
+            console.log("--- Making fetch request with Access Token ---");
+            console.log("Endpoint:", activeAgent.endpoint);
+            console.log("Headers:", requestHeaders);
 
             const response = await fetch(activeAgent.endpoint, {
                 method: 'POST',
@@ -194,29 +193,24 @@ const ChatbotTemplate = () => {
                 body: JSON.stringify(requestBody),
             });
             
+            const responseBodyText = await response.text();
+            console.log("Raw Response Body:", responseBodyText);
+
             if (!response.ok) {
-                 const errorBody = await response.text();
-                 let errorMsg = `HTTP error! status: ${response.status}`;
-                 try {
-                     const errorJson = JSON.parse(errorBody);
-                     errorMsg = errorJson.error || errorMsg;
-                 } catch (e) {
-                     errorMsg = `${errorMsg} - ${errorBody}`;
-                 }
-                 throw new Error(errorMsg);
+                console.error("Fetch response was not ok.", { status: response.status, body: responseBodyText });
+                let errorMsg = `HTTP error! status: ${response.status}`;
+                try {
+                    const errorJson = JSON.parse(responseBodyText);
+                    errorMsg = errorJson.error || errorMsg;
+                } catch (e) {}
+                throw new Error(errorMsg);
             }
 
-            const data = await response.json();
-            
-            const updatedHistory = data.history.map((h, index) => ({
-                id: Date.now() + index,
-                type: h.role === 'model' ? 'bot' : 'user',
-                content: h.parts[0].text,
-                timestamp: new Date().toISOString()
-            }));
+            const data = JSON.parse(responseBodyText);
+            console.log("Successfully parsed JSON data:", data);
 
             setAgents(prevAgents => prevAgents.map(agent =>
-                agent.id === currentAgentId ? { ...agent, messages: updatedHistory } : agent
+                agent.id === currentAgentId ? { ...agent, messages: data.history } : agent
             ));
 
         } catch (error) {
@@ -224,13 +218,14 @@ const ChatbotTemplate = () => {
             const errorResponse = {
                 id: Date.now() + 1,
                 type: 'bot',
-                content: `Sorry, I encountered a critical error. Please check the developer console for details. (Error: ${error.message})`,
+                content: `Sorry, I encountered a critical error: ${error.message}`,
                 timestamp: new Date().toISOString(),
             };
             setAgents(prevAgents => prevAgents.map(agent =>
                 agent.id === currentAgentId ? { ...agent, messages: [...agent.messages, errorResponse] } : agent
             ));
         } finally {
+            console.log("--- Finished handleSendMessage ---");
             setIsLoading(false);
         }
     };
@@ -361,39 +356,14 @@ const ChatbotTemplate = () => {
                     <div className="flex items-center space-x-4">
                          <button 
                             onClick={toggleDarkMode}
-                            title="Toggle light/dark mode"
                             className={`p-2 rounded-lg transition-colors ${
                                 isDarkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'
                             }`}
                         >
                             {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                         </button>
-                        <div 
-                            className="relative"
-                            onMouseEnter={() => setIsUserMenuOpen(true)}
-                            onMouseLeave={() => setIsUserMenuOpen(false)}
-                        >
-                            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center cursor-pointer">
-                                <User className="w-4 h-4 text-white" />
-                            </div>
-                            {isUserMenuOpen && (
-                                <div 
-                                    className={`absolute right-0 mt-2 w-48 ${cardClass} border rounded-lg shadow-xl py-1 z-20`}
-                                >
-                                    <div className="px-3 py-2">
-                                        <p className={`text-sm font-semibold ${textClass}`}>{user.displayName}</p>
-                                        <p className={`text-xs ${textSecondaryClass}`}>{user.email}</p>
-                                    </div>
-                                    <div className={`my-1 border-t ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}></div>
-                                    <button
-                                        onClick={handleSignOut}
-                                        className={`w-full text-left flex items-center px-3 py-2 text-sm ${textClass} ${hoverClass}`}
-                                    >
-                                      <LogOut className="w-4 h-4 mr-2" />
-                                      Sign Out
-                                    </button>
-                                </div>
-                            )}
+                        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                            <User className="w-4 h-4 text-white" />
                         </div>
                     </div>
                 </div>
@@ -473,6 +443,7 @@ const ChatbotTemplate = () => {
                             {/* Chat Messages */}
                             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
                                 {agentMessages.map((message) => (
+                                    message && message.id && (
                                     <div 
                                         key={message.id} 
                                         className={`flex transition-all duration-300 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -482,10 +453,11 @@ const ChatbotTemplate = () => {
                                                 : isDarkMode ? 'bg-gray-700 text-gray-100 rounded-tl-none border border-gray-600' : 'bg-white text-gray-900 rounded-tl-none border border-gray-200 shadow-md'
                                         }`}>
                                             <div className={`leading-relaxed whitespace-pre-wrap ${message.type === 'user' ? 'text-white' : textClass}`}>
-                                                {message.content}
+                                                {typeof message.content === 'string' ? message.content : JSON.stringify(message.content)}
                                             </div>
                                         </div>
                                     </div>
+                                    )
                                 ))}
                                 
                                 {isLoading && (
