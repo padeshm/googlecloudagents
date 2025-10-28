@@ -16,58 +16,59 @@ import {
     TrendingUp,
     Users,
     Layers,
-    Zap
+    Zap,
+    LogOut
 } from 'lucide-react';
 import { auth } from './firebase';
-import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "firebase/auth";
+import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "firebase/auth";
 
 
 // --- Dummy Agent Data ---
 const dummyAgents = [
-    { 
-        id: 1, 
-        name: 'ITSM Resolver', 
-        description: 'Automates incident resolution and ticket updates.', 
-        icon: Activity, 
-        color: 'text-red-500', 
-        status: 'Active', 
-        stats: '124 Auto-Resolves' 
+    {
+        id: 1,
+        name: 'ITSM Resolver',
+        description: 'Automates incident resolution and ticket updates.',
+        icon: Activity,
+        color: 'text-red-500',
+        status: 'Active',
+        stats: '124 Auto-Resolves'
     },
-    { 
-        id: 2, 
-        name: 'Change Manager Bot', 
-        description: 'Reviews and approves standard change requests automatically.', 
-        icon: Calendar, 
-        color: 'text-purple-500', 
-        status: 'Active', 
-        stats: '45 Changes Managed' 
+    {
+        id: 2,
+        name: 'Change Manager Bot',
+        description: 'Reviews and approves standard change requests automatically.',
+        icon: Calendar,
+        color: 'text-purple-500',
+        status: 'Active',
+        stats: '45 Changes Managed'
     },
-    { 
-        id: 3, 
-        name: 'Data Analyst Agent', 
-        description: 'Provides insights and trend analysis on historical data.', 
-        icon: TrendingUp, 
-        color: 'text-green-500', 
-        status: 'Deploying', 
-        stats: '8 Reports Generated' 
+    {
+        id: 3,
+        name: 'Data Analyst Agent',
+        description: 'Provides insights and trend analysis on historical data.',
+        icon: TrendingUp,
+        color: 'text-green-500',
+        status: 'Deploying',
+        stats: '8 Reports Generated'
     },
-    { 
-        id: 4, 
-        name: 'User Support Assistant', 
-        description: 'Handles common L1 requests and user guidance.', 
-        icon: Users, 
-        color: 'text-blue-500', 
-        status: 'Active', 
-        stats: '1500+ User Interactions' 
+    {
+        id: 4,
+        name: 'User Support Assistant',
+        description: 'Handles common L1 requests and user guidance.',
+        icon: Users,
+        color: 'text-blue-500',
+        status: 'Active',
+        stats: '1500+ User Interactions'
     },
-    { 
-        id: 5, 
-        name: 'Configuration Auditor', 
-        description: 'Monitors configuration items for compliance drift.', 
-        icon: Server, 
-        color: 'text-orange-500', 
-        status: 'Inactive', 
-        stats: 'Last Run: 2 Days Ago' 
+    {
+        id: 5,
+        name: 'Configuration Auditor',
+        description: 'Monitors configuration items for compliance drift.',
+        icon: Server,
+        color: 'text-orange-500',
+        status: 'Inactive',
+        stats: 'Last Run: 2 Days Ago'
     },
 ];
 
@@ -76,7 +77,8 @@ const ChatbotTemplate = () => {
     const [isDarkMode, setIsDarkMode] = useState(false);
     const [user, setUser] = useState(null);
     const [gcpAccessToken, setGcpAccessToken] = useState(null);
-    
+    const [isProfileOpen, setIsProfileOpen] = useState(false);
+
     const lightModeLogo = 'https://www.wipro.com/content/dam/wipro/social-icons/wipro_new_logo.svg';
     const darkModeLogo = 'https://companieslogo.com/img/orig/WIT.D-91671412.png?t=1739861069';
 
@@ -88,7 +90,7 @@ const ChatbotTemplate = () => {
             messages: [
                 { id: 1, type: 'bot', content: "Hello! I am the Google Cloud Helper. How can I assist you with GCP today?", timestamp: new Date().toISOString() }
             ],
-            endpoint: 'https://mcp-server-backend-652176787350.us-central1.run.app/api/prompt' 
+            endpoint: 'https://mcp-server-backend-652176787350.us-central1.run.app/api/prompt'
         },
         {
             id: 'security-triage-alert',
@@ -106,8 +108,9 @@ const ChatbotTemplate = () => {
     const [currentMessage, setCurrentMessage] = useState('');
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
-    
+
     const fileInputRef = useRef(null);
+    const profileRef = useRef(null);
 
     const activeAgent = agents.find(a => a.id === currentAgentId);
 
@@ -121,6 +124,19 @@ const ChatbotTemplate = () => {
         });
         return () => unsubscribe();
     }, []);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (profileRef.current && !profileRef.current.contains(event.target)) {
+                setIsProfileOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+        };
+    }, []);
+
 
     const handleSignIn = async () => {
         const provider = new GoogleAuthProvider();
@@ -143,7 +159,18 @@ const ChatbotTemplate = () => {
             setGcpAccessToken(null);
         }
     };
-  
+
+    const handleSignOut = () => {
+        signOut(auth).then(() => {
+            setUser(null);
+            setGcpAccessToken(null);
+            setIsProfileOpen(false);
+            console.log("User signed out successfully.");
+        }).catch((error) => {
+            console.error("Sign-out error:", error);
+        });
+    };
+
     const handleSendMessage = async () => {
         if (!activeAgent || (currentMessage.trim() === '' && uploadedFiles.length === 0) || !user || !gcpAccessToken) {
             console.log("handleSendMessage aborted:", { activeAgent, currentMessage, uploadedFiles, user, gcpAccessToken });
@@ -168,7 +195,7 @@ const ChatbotTemplate = () => {
         setAgents(prevAgents => prevAgents.map(agent =>
             agent.id === currentAgentId ? { ...agent, messages: currentHistory } : agent
         ));
-        
+
         setIsLoading(true);
         const messageToSend = currentMessage;
         setCurrentMessage('');
@@ -192,7 +219,7 @@ const ChatbotTemplate = () => {
                 headers: requestHeaders,
                 body: JSON.stringify(requestBody),
             });
-            
+
             const responseBodyText = await response.text();
             console.log("Raw Response Body:", responseBodyText);
 
@@ -249,7 +276,7 @@ const ChatbotTemplate = () => {
     const removeFile = (index) => {
         setUploadedFiles(prev => prev.filter((_, i) => i !== index));
     };
-    
+
     const getStatusColor = (status) => {
         switch(status) {
             case 'Active': return 'bg-green-500';
@@ -312,13 +339,13 @@ const ChatbotTemplate = () => {
     return (
         <div className={`min-h-screen transition-colors duration-300 ${themeClass} flex flex-col h-screen`}>
             {/* Header */}
-            <header className={`${cardClass} border-b px-6 py-4 transition-colors duration-300 shadow-lg z-10 flex-shrink-0`}>
+            <header className={`${cardClass} border-b px-6 py-4 transition-colors duration-300 shadow-lg z-20 flex-shrink-0`}>
                 <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-6">
                         <div className="flex items-center space-x-3">
-                            <img 
-                                src={isDarkMode ? darkModeLogo : lightModeLogo} 
-                                alt="Company Logo" 
+                            <img
+                                src={isDarkMode ? darkModeLogo : lightModeLogo}
+                                alt="Company Logo"
                                 className="h-10 w-auto object-contain transition-opacity duration-300"
                                 onError={(e) => {
                                     e.target.style.display = 'none';
@@ -326,22 +353,22 @@ const ChatbotTemplate = () => {
                                 }}
                             />
                             <Shield className="w-8 h-8 text-blue-600" style={{ display: 'none' }} />
-                            
+
                             <div>
                                 <h1 className={`text-xl font-bold ${textClass}`}>Google Cloud Agents </h1>
                             </div>
                         </div>
-                        
+
                         <nav className={`flex rounded-xl p-1 shadow-inner ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'} hidden`}>
                             {[
                                 { id: 'chatbot', label: 'AI Agents', icon: MessageCircle },
                                 { id: 'agents', label: 'Agents', icon: Zap }
                             ].map((tab) => (
-                                <button 
+                                <button
                                     key={tab.id}
                                     onClick={() => setActiveTab(tab.id)}
                                     className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                                        activeTab === tab.id 
+                                        activeTab === tab.id
                                             ? 'bg-blue-600 text-white shadow-md'
                                             : isDarkMode ? 'text-gray-300 hover:bg-gray-600' : 'text-gray-600 hover:bg-white'
                                     }`}
@@ -352,9 +379,9 @@ const ChatbotTemplate = () => {
                             ))}
                         </nav>
                     </div>
-                    
+
                     <div className="flex items-center space-x-4">
-                         <button 
+                         <button
                             onClick={toggleDarkMode}
                             className={`p-2 rounded-lg transition-colors ${
                                 isDarkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'
@@ -362,8 +389,35 @@ const ChatbotTemplate = () => {
                         >
                             {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                         </button>
-                        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                            <User className="w-4 h-4 text-white" />
+
+                        <div className="relative" ref={profileRef}>
+                            <button onClick={() => setIsProfileOpen(!isProfileOpen)} className="w-10 h-10 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                                {user.photoURL ? (
+                                    <img src={user.photoURL} alt="Profile" className="w-full h-full rounded-full object-cover" />
+                                ) : (
+                                    <div className="w-full h-full bg-blue-600 rounded-full flex items-center justify-center">
+                                        <User className="w-5 h-5 text-white" />
+                                    </div>
+                                )}
+                            </button>
+                            {isProfileOpen && (
+                                <div className={`absolute right-0 mt-2 w-64 ${cardClass} border rounded-xl shadow-2xl py-2 z-50 animate-fade-in`}>
+                                    <div className={`flex items-center px-4 py-3 border-b ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                                        <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-full object-cover mr-3" />
+                                        <div className="min-w-0">
+                                            <p className={`font-semibold truncate ${textClass}`}>{user.displayName || 'User'}</p>
+                                            <p className={`text-sm truncate ${textSecondaryClass}`}>{user.email}</p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={handleSignOut}
+                                        className={`w-full text-left flex items-center px-4 py-3 text-sm transition-colors ${textSecondaryClass} ${hoverClass}`}
+                                    >
+                                        <LogOut className="w-4 h-4 mr-3" />
+                                        Sign Out
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -371,7 +425,7 @@ const ChatbotTemplate = () => {
 
             {/* Main Content Area */}
             <main className="flex-1 overflow-hidden p-6">
-                
+
                 {activeTab === 'agents' && (
                     <div className="space-y-6 h-full overflow-y-auto">
                         <h2 className={`text-2xl font-bold ${textClass}`}>Autonomous Agents </h2>
@@ -402,7 +456,7 @@ const ChatbotTemplate = () => {
                                         <Plus className="w-4 h-4" />
                                     </button>
                                 </div>
-                                
+
                                 <div className={`flex items-center space-x-2 p-3 rounded-xl ${isDarkMode ? 'bg-gray-700/50' : 'bg-blue-50'} hidden`}>
                                     <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                                     <span className={`text-sm ${textSecondaryClass} font-medium`}>
@@ -418,8 +472,8 @@ const ChatbotTemplate = () => {
                                         className={`p-4 border-b cursor-pointer transition-all duration-200 flex justify-between items-center group ${
                                             isDarkMode ? 'border-gray-700 hover:bg-gray-700/50' : 'border-gray-200 hover:bg-gray-100'
                                         } ${
-                                            currentAgentId === agent.id 
-                                                ? isDarkMode ? 'bg-gray-700 shadow-inner' : 'bg-blue-50/70 border-blue-300' 
+                                            currentAgentId === agent.id
+                                                ? isDarkMode ? 'bg-gray-700 shadow-inner' : 'bg-blue-50/70 border-blue-300'
                                                 : ''
                                         }`}
                                     >
@@ -444,8 +498,8 @@ const ChatbotTemplate = () => {
                             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
                                 {agentMessages.map((message) => (
                                     message && message.id && (
-                                    <div 
-                                        key={message.id} 
+                                    <div
+                                        key={message.id}
                                         className={`flex transition-all duration-300 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
                                         <div className={`max-w-3xl p-4 rounded-xl shadow-lg animate-fade-in ${
                                             message.type === 'user'
@@ -459,7 +513,7 @@ const ChatbotTemplate = () => {
                                     </div>
                                     )
                                 ))}
-                                
+
                                 {isLoading && (
                                     <div className="flex justify-start">
                                         <div className={`max-w-2xl p-4 rounded-xl shadow-md rounded-tl-none border animate-pulse-fade ${isDarkMode ? 'bg-gray-700 text-gray-100 border-gray-600' : 'bg-white text-gray-900 border-gray-200'}`}>
@@ -473,7 +527,7 @@ const ChatbotTemplate = () => {
                                     </div>
                                 )}
                             </div>
-                            
+
                             {/* Message Input Area */}
                             <div className={`p-6 border-t flex-shrink-0 ${isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
                                 {uploadedFiles.length > 0 && (
