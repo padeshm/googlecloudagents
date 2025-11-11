@@ -32,65 +32,19 @@ def list_gcs_buckets_func(project_id, credentials):
     except Exception as e:
         return {"error": str(e)}
 
-def get_gcs_bucket_details_func(bucket_name, project_id, credentials):
-    """Gets detailed information about a specific GCS bucket."""
-    try:
-        if not bucket_name:
-            return {"error": "Bucket name not provided by the model."}
-        if not project_id:
-            return {"error": "Project ID not provided by the model for getting bucket details."}
-
-        storage_client = storage.Client(credentials=credentials, project=project_id)
-        bucket = storage_client.get_bucket(bucket_name)
-        
-        details = {
-            "name": bucket.name,
-            "storage_class": bucket.storage_class,
-            "location": bucket.location,
-            "location_type": bucket.location_type,
-            "time_created": bucket.time_created.isoformat() if bucket.time_created else None,
-            "updated": bucket.updated.isoformat() if bucket.updated else None,
-            "versioning_enabled": bucket.versioning_enabled,
-            "logging": str(bucket.logging) if bucket.logging else None,
-            "labels": bucket.labels,
-        }
-        return details
-    except Exception as e:
-        return {"error": str(e)}
-
-gcs_tool = Tool(function_declarations=[
-    FunctionDeclaration(
-        name="list_gcs_buckets",
-        description="Lists GCS buckets in a specified Google Cloud project.",
-        parameters={
-            "type": "OBJECT",
-            "properties": {
-                "project_id": {
-                    "type": "STRING",
-                    "description": "The Google Cloud project ID to list buckets from."
-                }
+list_buckets_tool = Tool(function_declarations=[FunctionDeclaration(
+    name="list_gcs_buckets",
+    description="Lists GCS buckets in a specified Google Cloud project.",
+    parameters={
+        "type": "OBJECT",
+        "properties": {
+            "project_id": {
+                "type": "STRING",
+                "description": "The Google Cloud project ID to list buckets from."
             }
         }
-    ),
-    FunctionDeclaration(
-        name="get_gcs_bucket_details",
-        description="Gets detailed information about a specific GCS bucket.",
-        parameters={
-            "type": "OBJECT",
-            "properties": {
-                "bucket_name": {
-                    "type": "STRING",
-                    "description": "The name of the GCS bucket to get details for."
-                },
-                "project_id": {
-                    "type": "STRING",
-                    "description": "The Google Cloud project ID that the bucket belongs to."
-                }
-            },
-            "required": ["bucket_name", "project_id"]
-        }
-    )
-])
+    }
+)])
 
 @app.route('/api/prompt', methods=['POST', 'OPTIONS'])
 def handle_prompt():
@@ -111,7 +65,7 @@ def handle_prompt():
         if not prompt:
             return jsonify({'error': 'Prompt not provided'}), 400
 
-        model = GenerativeModel("gemini-2.5-flash", tools=[gcs_tool])
+        model = GenerativeModel("gemini-2.5-flash", tools=[list_buckets_tool])
 
         # Convert frontend history to Vertex AI Content objects
         history_from_frontend = data.get('history', [])
@@ -132,39 +86,22 @@ def handle_prompt():
                     project_id=args.get("project_id"),
                     credentials=user_credentials
                 )
-                response = chat.send_message(Part.from_function_response(name="list_gcs_buckets", response=tool_output))
-            elif function_call.name == "get_gcs_bucket_details":
-                args = function_call.args
-                tool_output = get_gcs_bucket_details_func(
-                    bucket_name=args.get("bucket_name"),
-                    project_id=args.get("project_id"),
-                    credentials=user_credentials
-                )
-                response = chat.send_message(Part.from_function_response(name="get_gcs_bucket_details", response=tool_output))
+                response = chat.send_message(Part.from_function_response(name="list_gcs_buckets", response={"content": tool_output}))
 
         # Convert Vertex AI history back to frontend format
         final_history_for_frontend = []
         for i, content in enumerate(chat.history):
             content_dict = content.to_dict()
             role = content_dict.get('role')
-            if role not in ["user", "model"] or not content_dict.get('parts'):
-                continue
-
-            text_parts = [
-                part['text']
-                for part in content_dict.get('parts', [])
-                if 'text' in part
-            ]
-
-            if not text_parts:
-                continue
-
-            final_history_for_frontend.append({
-                "id": f"history-msg-{i}",
-                "type": "bot" if role == "model" else "user",
-                "content": "\n".join(text_parts),
-                "timestamp": datetime.now().isoformat()
-            })
+            if role in ["user", "model"] and content_dict.get('parts'):
+                first_part = content_dict['parts'][0]
+                if 'text' in first_part:
+                    final_history_for_frontend.append({
+                        "id": f"history-msg-{i}",
+                        "type": "bot" if role == "model" else "user",
+                        "content": first_part['text'],
+                        "timestamp": datetime.now().isoformat()
+                    })
 
         return jsonify({'response': response.text, 'history': final_history_for_frontend})
 
