@@ -1,0 +1,53 @@
+name: Deploy Backend to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'mcp-server/backend/**'
+
+env:
+  PROJECT_ID: mahle-translation-poc
+  REGION: us-central1
+  SERVICE_NAME: mcp-server-backend
+  REPO_NAME: mcp-server-repo
+
+jobs:
+  deploy:
+    name: Build and Deploy Backend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: 'google-github-actions/auth@v2'
+        with:
+          workload_identity_provider: '${{ secrets.WIF_PROVIDER }}'
+          service_account: '${{ secrets.WIF_SERVICE_ACCOUNT }}'
+
+      - name: Set up Cloud SDK
+        uses: 'google-github-actions/setup-gcloud@v2'
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Build Docker image
+        run: |-
+          docker build --no-cache -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:latest ./mcp-server/backend
+
+      - name: Push Docker image
+        run: docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:latest
+
+      - name: Deploy to Cloud Run
+        run: |-
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:latest \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated
