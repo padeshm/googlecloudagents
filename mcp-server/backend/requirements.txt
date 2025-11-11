@@ -4,3 +4,4 @@ gunicorn
 google-cloud-storage
 google-auth
 Flask-Cors
+google-cloud-vertexai
