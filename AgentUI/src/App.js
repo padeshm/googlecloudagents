@@ -6,9 +6,7 @@ import {
     Moon,
     Sun,
     Loader,
-    Zap,
     LogOut,
-    Terminal
 } from 'lucide-react';
 import { auth } from './firebase';
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "firebase/auth";
@@ -25,18 +23,16 @@ const ChatbotTemplate = () => {
     const [agents, setAgents] = useState([
         {
             id: 'google-cloud-helper',
-            name: 'Google Cloud Helper',
-            icon: Zap,
-            description: 'I can help you with Google Cloud questions, billing, and basic operations.',
+            name: 'Google Cloud Storage Agent',
+            description: 'I can help you with listing various Google Cloud Storage bucket details in the project you specify',
             messages: [
-                { id: 1, type: 'bot', content: "Hello! I am the Google Cloud Helper. How can I assist you with GCP today?", timestamp: new Date().toISOString() }
+                { id: 1, type: 'bot', content: "Hello! I am the Google Cloud Storage Agent. You are looking for which project's storage buckets?", timestamp: new Date().toISOString() }
             ],
             endpoint: 'https://mcp-server-backend-652176787350.us-central1.run.app/api/prompt'
         },
         {
             id: 'gcloud-command-executor',
-            name: 'GCloud Command Executor',
-            icon: Terminal,
+            name: 'Google Cloud Command Executor',
             description: 'I execute gcloud commands directly. I do not understand natural language.',
             messages: [
                 { id: 1, type: 'bot', content: "GCloud Command Executor ready. Please provide a `gcloud` command to run (e.g., 'compute instances list').", timestamp: new Date().toISOString() }
@@ -297,9 +293,7 @@ const ChatbotTemplate = () => {
                             </div>
                         </div>
                         <div className="overflow-y-auto flex-1 custom-scrollbar">
-                            {agents.map((agent) => {
-                                const Icon = agent.icon;
-                                return (
+                            {agents.map((agent) => (
                                 <div
                                     key={agent.id}
                                     onClick={() => setCurrentAgentId(agent.id)}
@@ -311,15 +305,12 @@ const ChatbotTemplate = () => {
                                             : ''
                                     }`}
                                 >
-                                    <div className={`p-2 rounded-lg mr-4 ${currentAgentId === agent.id ? 'bg-blue-100' : (isDarkMode ? 'bg-gray-700' : 'bg-gray-100')}`}>
-                                       <Icon className={`w-6 h-6 ${currentAgentId === agent.id ? 'text-blue-600' : textSecondaryClass}`} />
-                                    </div>
                                     <div className="flex-1 min-w-0">
                                         <h4 className={`font-medium truncate ${currentAgentId === agent.id ? 'text-blue-500' : textClass}`}>{agent.name}</h4>
                                         <p className={`text-sm ${textSecondaryClass} truncate`}>{agent.description}</p>
                                     </div>
                                 </div>
-                            )})}
+                            ))}
                         </div>
                     </div>
 
