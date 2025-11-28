@@ -2,21 +2,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
     User,
-    Plus,
-    MessageCircle,
     Send,
-    Paperclip,
-    X,
     Moon,
     Sun,
-    Shield,
-    Activity,
-    Calendar,
     Loader,
-    Server,
-    TrendingUp,
-    Users,
-    Layers,
     Zap,
     LogOut,
     Terminal
@@ -24,22 +13,7 @@ import {
 import { auth } from './firebase';
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "firebase/auth";
 
-
-// --- Dummy Agent Data ---
-const dummyAgents = [
-    {
-        id: 1,
-        name: 'ITSM Resolver',
-        description: 'Automates incident resolution and ticket updates.',
-        icon: Activity,
-        color: 'text-red-500',
-        status: 'Active',
-        stats: '124 Auto-Resolves'
-    },
-];
-
 const ChatbotTemplate = () => {
-    const [activeTab, setActiveTab] = useState('chatbot');
     const [isDarkMode, setIsDarkMode] = useState(false);
     const [user, setUser] = useState(null);
     const [gcpAccessToken, setGcpAccessToken] = useState(null);
@@ -71,13 +45,10 @@ const ChatbotTemplate = () => {
         }
     ]);
 
-
     const [currentAgentId, setCurrentAgentId] = useState('google-cloud-helper');
     const [currentMessage, setCurrentMessage] = useState('');
-    const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
 
-    const fileInputRef = useRef(null);
     const profileRef = useRef(null);
     const messagesEndRef = useRef(null);
 
@@ -225,18 +196,8 @@ const ChatbotTemplate = () => {
         }
     };
 
-
     const toggleDarkMode = () => {
         setIsDarkMode(!isDarkMode);
-    };
-
-    const getStatusColor = (status) => {
-        switch(status) {
-            case 'Active': return 'bg-green-500';
-            case 'Deploying': return 'bg-yellow-500';
-            case 'Inactive': return 'bg-gray-500';
-            default: return 'bg-gray-400';
-        }
     };
 
     const themeClass = isDarkMode ? 'dark bg-gray-900' : 'bg-gray-50';
