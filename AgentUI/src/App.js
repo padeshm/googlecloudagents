@@ -24,7 +24,6 @@ const ChatbotTemplate = () => {
         {
             id: 'google-cloud-helper',
             name: 'Google Cloud Storage Agent',
-            description: 'I can help you with listing various Google Cloud Storage bucket details in the project you specify',
             messages: [
                 { id: 1, type: 'bot', content: "Hello! I am the Google Cloud Storage Agent. You are looking for which project's storage buckets?", timestamp: new Date().toISOString() }
             ],
@@ -33,7 +32,6 @@ const ChatbotTemplate = () => {
         {
             id: 'gcloud-command-executor',
             name: 'Google Cloud Command Executor',
-            description: 'I execute gcloud commands directly. I do not understand natural language.',
             messages: [
                 { id: 1, type: 'bot', content: "GCloud Command Executor ready. Please provide a `gcloud` command to run (e.g., 'compute instances list').", timestamp: new Date().toISOString() }
             ],
