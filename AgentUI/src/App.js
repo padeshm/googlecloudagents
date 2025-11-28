@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import {
     User,
@@ -17,7 +18,8 @@ import {
     Users,
     Layers,
     Zap,
-    LogOut
+    LogOut,
+    Terminal
 } from 'lucide-react';
 import { auth } from './firebase';
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "firebase/auth";
@@ -33,42 +35,6 @@ const dummyAgents = [
         color: 'text-red-500',
         status: 'Active',
         stats: '124 Auto-Resolves'
-    },
-    {
-        id: 2,
-        name: 'Change Manager Bot',
-        description: 'Reviews and approves standard change requests automatically.',
-        icon: Calendar,
-        color: 'text-purple-500',
-        status: 'Active',
-        stats: '45 Changes Managed'
-    },
-    {
-        id: 3,
-        name: 'Data Analyst Agent',
-        description: 'Provides insights and trend analysis on historical data.',
-        icon: TrendingUp,
-        color: 'text-green-500',
-        status: 'Deploying',
-        stats: '8 Reports Generated'
-    },
-    {
-        id: 4,
-        name: 'User Support Assistant',
-        description: 'Handles common L1 requests and user guidance.',
-        icon: Users,
-        color: 'text-blue-500',
-        status: 'Active',
-        stats: '1500+ User Interactions'
-    },
-    {
-        id: 5,
-        name: 'Configuration Auditor',
-        description: 'Monitors configuration items for compliance drift.',
-        icon: Server,
-        color: 'text-orange-500',
-        status: 'Inactive',
-        stats: 'Last Run: 2 Days Ago'
     },
 ];
 
@@ -86,6 +52,7 @@ const ChatbotTemplate = () => {
         {
             id: 'google-cloud-helper',
             name: 'Google Cloud Helper',
+            icon: Zap,
             description: 'I can help you with Google Cloud questions, billing, and basic operations.',
             messages: [
                 { id: 1, type: 'bot', content: "Hello! I am the Google Cloud Helper. How can I assist you with GCP today?", timestamp: new Date().toISOString() }
@@ -93,13 +60,14 @@ const ChatbotTemplate = () => {
             endpoint: 'https://mcp-server-backend-652176787350.us-central1.run.app/api/prompt'
         },
         {
-            id: 'security-triage-alert',
-            name: 'Security Triage Alert',
-            description: 'I assist with triaging security alerts and running initial diagnostics.',
+            id: 'gcloud-command-executor',
+            name: 'GCloud Command Executor',
+            icon: Terminal,
+            description: 'I execute gcloud commands directly. I do not understand natural language.',
             messages: [
-                { id: 1, type: 'bot', content: "Security agent online. Report any suspicious activity or ask for an alert status.", timestamp: new Date().toISOString() }
+                { id: 1, type: 'bot', content: "GCloud Command Executor ready. Please provide a `gcloud` command to run (e.g., 'compute instances list').", timestamp: new Date().toISOString() }
             ],
-            endpoint: 'https://your-cloud-function-url-goes-here'
+            endpoint: 'https://gcloud-mcp-server-652176787350.us-central1.run.app/api/gcloud'
         }
     ]);
 
@@ -111,8 +79,14 @@ const ChatbotTemplate = () => {
 
     const fileInputRef = useRef(null);
     const profileRef = useRef(null);
+    const messagesEndRef = useRef(null);
 
     const activeAgent = agents.find(a => a.id === currentAgentId);
+
+     useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [activeAgent?.messages]);
+
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -140,7 +114,7 @@ const ChatbotTemplate = () => {
 
     const handleSignIn = async () => {
         const provider = new GoogleAuthProvider();
-        provider.addScope('https://www.googleapis.com/auth/cloud-platform.read-only');
+        provider.addScope('https://www.googleapis.com/auth/cloud-platform');
         provider.setCustomParameters({ prompt: 'select_account' });
 
         try {
@@ -172,87 +146,81 @@ const ChatbotTemplate = () => {
     };
 
     const handleSendMessage = async () => {
-        if (!activeAgent || (currentMessage.trim() === '' && uploadedFiles.length === 0) || !user || !gcpAccessToken) {
-            console.log("handleSendMessage aborted:", { activeAgent, currentMessage, uploadedFiles, user, gcpAccessToken });
-            if (!gcpAccessToken) {
-                alert("Could not send message. GCP Access Token is missing. Please sign in again.");
-            }
+        if (!activeAgent || currentMessage.trim() === '' || !user || !gcpAccessToken) {
+            if (!gcpAccessToken) alert("GCP Access Token is missing. Please sign in again.");
             return;
         }
-
-        console.log("--- Starting handleSendMessage ---");
 
         const userMessage = {
             id: Date.now(),
             type: 'user',
             content: currentMessage,
-            files: uploadedFiles.map(f => ({ name: f.name, size: f.size })),
             timestamp: new Date().toISOString()
         };
 
-        const currentHistory = [...activeAgent.messages, userMessage];
+        const currentHistoryWithUserMessage = [...activeAgent.messages, userMessage];
 
         setAgents(prevAgents => prevAgents.map(agent =>
-            agent.id === currentAgentId ? { ...agent, messages: currentHistory } : agent
+            agent.id === currentAgentId ? { ...agent, messages: currentHistoryWithUserMessage } : agent
         ));
 
         setIsLoading(true);
         const messageToSend = currentMessage;
         setCurrentMessage('');
-        setUploadedFiles([]);
 
         try {
-            const token = gcpAccessToken;
+            const isCommandExecutor = activeAgent.id === 'gcloud-command-executor';
 
-            const requestBody = { prompt: messageToSend, history: activeAgent.messages };
-            const requestHeaders = {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            };
-
-            console.log("--- Making fetch request with Access Token ---");
-            console.log("Endpoint:", activeAgent.endpoint);
-            console.log("Headers:", requestHeaders);
+            const requestBody = isCommandExecutor
+                ? { command: messageToSend }
+                : { prompt: messageToSend, history: activeAgent.messages };
 
             const response = await fetch(activeAgent.endpoint, {
                 method: 'POST',
-                headers: requestHeaders,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${gcpAccessToken}`
+                },
                 body: JSON.stringify(requestBody),
             });
 
-            const responseBodyText = await response.text();
-            console.log("Raw Response Body:", responseBodyText);
+            const data = await response.json();
 
             if (!response.ok) {
-                console.error("Fetch response was not ok.", { status: response.status, body: responseBodyText });
-                let errorMsg = `HTTP error! status: ${response.status}`;
-                try {
-                    const errorJson = JSON.parse(responseBodyText);
-                    errorMsg = errorJson.error || errorMsg;
-                } catch (e) {}
-                throw new Error(errorMsg);
+                 // Use the error message from the backend response if available
+                throw new Error(data.response || data.error || `HTTP error! status: ${response.status}`);
             }
 
-            const data = JSON.parse(responseBodyText);
-            console.log("Successfully parsed JSON data:", data);
+            if (isCommandExecutor) {
+                const botMessage = {
+                    id: Date.now() + 1,
+                    type: 'bot',
+                    content: data.response,
+                    timestamp: new Date().toISOString(),
+                };
+                 setAgents(prevAgents => prevAgents.map(agent =>
+                    agent.id === currentAgentId ? { ...agent, messages: [...currentHistoryWithUserMessage, botMessage] } : agent
+                ));
 
-            setAgents(prevAgents => prevAgents.map(agent =>
-                agent.id === currentAgentId ? { ...agent, messages: data.history } : agent
-            ));
+            } else {
+                // For conversational agent, the backend returns the whole history
+                setAgents(prevAgents => prevAgents.map(agent =>
+                    agent.id === currentAgentId ? { ...agent, messages: data.history } : agent
+                ));
+            }
 
         } catch (error) {
-            console.error("--- Error in handleSendMessage catch block ---", error);
+            console.error("--- Error in handleSendMessage ---", error);
             const errorResponse = {
                 id: Date.now() + 1,
                 type: 'bot',
-                content: `Sorry, I encountered a critical error: ${error.message}`,
+                content: `Sorry, I encountered an error: ${error.message}`,
                 timestamp: new Date().toISOString(),
             };
             setAgents(prevAgents => prevAgents.map(agent =>
-                agent.id === currentAgentId ? { ...agent, messages: [...agent.messages, errorResponse] } : agent
+                agent.id === currentAgentId ? { ...agent, messages: [...currentHistoryWithUserMessage, errorResponse] } : agent
             ));
         } finally {
-            console.log("--- Finished handleSendMessage ---");
             setIsLoading(false);
         }
     };
@@ -260,21 +228,6 @@ const ChatbotTemplate = () => {
 
     const toggleDarkMode = () => {
         setIsDarkMode(!isDarkMode);
-    };
-
-    const handleFileUpload = (event) => {
-        const files = Array.from(event.target.files);
-        const validFiles = files.filter(file => file.size > 0);
-        if (validFiles.length > 0) {
-            setUploadedFiles(prev => [...prev, ...validFiles]);
-        }
-        if (event.target) {
-            event.target.value = '';
-        }
-    };
-
-    const removeFile = (index) => {
-        setUploadedFiles(prev => prev.filter((_, i) => i !== index));
     };
 
     const getStatusColor = (status) => {
@@ -311,73 +264,22 @@ const ChatbotTemplate = () => {
         );
     }
 
-    const AgentTile = ({ agent }) => {
-        const Icon = agent.icon;
-        return (
-            <div className={`p-6 rounded-xl border transition-all duration-300 ease-in-out transform hover:scale-[1.02] hover:shadow-xl ${cardClass} ${hoverClass}`}>
-                <div className="flex items-start justify-between">
-                    <div className={`p-3 rounded-full ${agent.color} bg-opacity-10`}>
-                        <Icon className={`w-6 h-6 ${agent.color}`} />
-                    </div>
-                    <div className="flex items-center space-x-2">
-                        <div className={`w-3 h-3 rounded-full ${getStatusColor(agent.status)} ${agent.status === 'Active' ? 'animate-pulse' : ''}`}></div>
-                        <span className={`text-sm font-medium ${textSecondaryClass}`}>{agent.status}</span>
-                    </div>
-                </div>
-                <h3 className={`mt-4 text-xl font-semibold ${textClass}`}>{agent.name}</h3>
-                <p className={`mt-1 text-sm ${textSecondaryClass}`}>{agent.description}</p>
-                <div className={`mt-4 pt-3 border-t ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} flex justify-between items-center`}>
-                    <span className={`text-xs font-mono ${textSecondaryClass}`}>{agent.stats}</span>
-                    <button className="text-blue-500 hover:text-blue-400 text-sm font-medium transition-colors flex items-center">
-                        Details <Layers className='w-4 h-4 ml-1' />
-                    </button>
-                </div>
-            </div>
-        );
-    };
-
     return (
         <div className={`min-h-screen transition-colors duration-300 ${themeClass} flex flex-col h-screen`}>
             {/* Header */}
             <header className={`${cardClass} border-b px-6 py-4 transition-colors duration-300 shadow-lg z-20 flex-shrink-0`}>
                 <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-6">
-                        <div className="flex items-center space-x-3">
+                         <div className="flex items-center space-x-3">
                             <img
                                 src={isDarkMode ? darkModeLogo : lightModeLogo}
                                 alt="Company Logo"
                                 className="h-10 w-auto object-contain transition-opacity duration-300"
-                                onError={(e) => {
-                                    e.target.style.display = 'none';
-                                    e.target.nextElementSibling.style.display = 'block';
-                                }}
                             />
-                            <Shield className="w-8 h-8 text-blue-600" style={{ display: 'none' }} />
-
                             <div>
                                 <h1 className={`text-xl font-bold ${textClass}`}>Google Cloud Agents </h1>
                             </div>
                         </div>
-
-                        <nav className={`flex rounded-xl p-1 shadow-inner ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'} hidden`}>
-                            {[
-                                { id: 'chatbot', label: 'AI Agents', icon: MessageCircle },
-                                { id: 'agents', label: 'Agents', icon: Zap }
-                            ].map((tab) => (
-                                <button
-                                    key={tab.id}
-                                    onClick={() => setActiveTab(tab.id)}
-                                    className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                                        activeTab === tab.id
-                                            ? 'bg-blue-600 text-white shadow-md'
-                                            : isDarkMode ? 'text-gray-300 hover:bg-gray-600' : 'text-gray-600 hover:bg-white'
-                                    }`}
-                                >
-                                    <tab.icon className="w-4 h-4 mr-2" />
-                                    {tab.label}
-                                </button>
-                            ))}
-                        </nav>
                     </div>
 
                     <div className="flex items-center space-x-4">
@@ -425,174 +327,111 @@ const ChatbotTemplate = () => {
 
             {/* Main Content Area */}
             <main className="flex-1 overflow-hidden p-6">
+                 <div className="h-full flex rounded-xl overflow-hidden shadow-2xl">
+                    {/* Chat Sidebar */}
+                    <div className={`w-80 flex-shrink-0 ${cardClass} border-r ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} flex flex-col h-full`}>
+                        <div className={`p-4 border-b flex-shrink-0 ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                            <div className="mb-4">
+                                <h3 className={`font-semibold text-xl ${textClass}`}>Agents</h3>
+                            </div>
+                        </div>
+                        <div className="overflow-y-auto flex-1 custom-scrollbar">
+                            {agents.map((agent) => {
+                                const Icon = agent.icon;
+                                return (
+                                <div
+                                    key={agent.id}
+                                    onClick={() => setCurrentAgentId(agent.id)}
+                                    className={`p-4 border-b cursor-pointer transition-all duration-200 flex items-start group ${
+                                        isDarkMode ? 'border-gray-700 hover:bg-gray-700/50' : 'border-gray-200 hover:bg-gray-100'
+                                    } ${
+                                        currentAgentId === agent.id
+                                            ? isDarkMode ? 'bg-gray-700 shadow-inner' : 'bg-blue-50/70'
+                                            : ''
+                                    }`}
+                                >
+                                    <div className={`p-2 rounded-lg mr-4 ${currentAgentId === agent.id ? 'bg-blue-100' : (isDarkMode ? 'bg-gray-700' : 'bg-gray-100')}`}>
+                                       <Icon className={`w-6 h-6 ${currentAgentId === agent.id ? 'text-blue-600' : textSecondaryClass}`} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <h4 className={`font-medium truncate ${currentAgentId === agent.id ? 'text-blue-500' : textClass}`}>{agent.name}</h4>
+                                        <p className={`text-sm ${textSecondaryClass} truncate`}>{agent.description}</p>
+                                    </div>
+                                </div>
+                            )})}
+                        </div>
+                    </div>
 
-                {activeTab === 'agents' && (
-                    <div className="space-y-6 h-full overflow-y-auto">
-                        <h2 className={`text-2xl font-bold ${textClass}`}>Autonomous Agents </h2>
-                        <p className={`text-md ${textSecondaryClass}`}>
-                            View and manage the specialized AI agents driving  automation.
-                        </p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                            {dummyAgents.map(agent => (
-                                <AgentTile key={agent.id} agent={agent} />
+                    {/* Chat Interface */}
+                    <div className={`flex-1 ${cardClass} flex flex-col h-full`}>
+                        <div className={`flex items-center p-4 border-b flex-shrink-0 ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                            <h2 className={`text-lg font-semibold ${textClass}`}>
+                                {activeAgent?.name || 'Select an Agent'}
+                            </h2>
+                        </div>
+                        {/* Chat Messages */}
+                        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                            {agentMessages.map((message) => (
+                                message && message.id && (
+                                <div
+                                    key={message.id}
+                                    className={`flex transition-all duration-300 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                    <div className={`max-w-3xl p-4 rounded-xl shadow-lg animate-fade-in ${
+                                        message.type === 'user'
+                                            ? 'bg-blue-600 text-white rounded-br-none'
+                                            : isDarkMode ? 'bg-gray-700 text-gray-100 rounded-tl-none border border-gray-600' : 'bg-white text-gray-900 rounded-tl-none border border-gray-200 shadow-md'
+                                    }`}>
+                                        <div className={`leading-relaxed whitespace-pre-wrap ${message.type === 'user' ? 'text-white' : textClass}`}>
+                                            {typeof message.content === 'string' ? message.content : JSON.stringify(message.content)}
+                                        </div>
+                                    </div>
+                                </div>
+                                )
                             ))}
-                        </div>
-                    </div>
-                )}
+                             <div ref={messagesEndRef} />
 
-                {activeTab === 'chatbot' && (
-                    <div className="h-full flex rounded-xl overflow-hidden shadow-2xl">
-                        {/* Chat Sidebar */}
-                        <div className={`w-80 flex-shrink-0 ${cardClass} border-r ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} flex flex-col h-full`}>
-                            <div className={`p-4 border-b flex-shrink-0 ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-                                <div className="mb-4">
-                                    <h3 className={`font-semibold text-xl ${textClass}`}>Agents</h3>
-                                </div>
-                                <div className="flex items-center justify-between mb-4 hidden">
-                                    <h3 className={`font-semibold text-lg ${textClass}`}>Sessions</h3>
-                                    <button
-                                        className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-transform transform hover:scale-110 shadow-md"
-                                    >
-                                        <Plus className="w-4 h-4" />
-                                    </button>
-                                </div>
-
-                                <div className={`flex items-center space-x-2 p-3 rounded-xl ${isDarkMode ? 'bg-gray-700/50' : 'bg-blue-50'} hidden`}>
-                                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                                    <span className={`text-sm ${textSecondaryClass} font-medium`}>
-                                        System Online
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="overflow-y-auto flex-1 custom-scrollbar">
-                                {agents.map((agent) => (
-                                    <div
-                                        key={agent.id}
-                                        onClick={() => setCurrentAgentId(agent.id)}
-                                        className={`p-4 border-b cursor-pointer transition-all duration-200 flex justify-between items-center group ${
-                                            isDarkMode ? 'border-gray-700 hover:bg-gray-700/50' : 'border-gray-200 hover:bg-gray-100'
-                                        } ${
-                                            currentAgentId === agent.id
-                                                ? isDarkMode ? 'bg-gray-700 shadow-inner' : 'bg-blue-50/70 border-blue-300'
-                                                : ''
-                                        }`}
-                                    >
-                                        <div className="flex-1 min-w-0">
-                                            <h4 className={`font-medium truncate ${currentAgentId === agent.id ? 'text-blue-500' : textClass}`}>{agent.name}</h4>
+                            {isLoading && (
+                                <div className="flex justify-start">
+                                    <div className={`max-w-2xl p-4 rounded-xl shadow-md rounded-tl-none border animate-pulse-fade ${isDarkMode ? 'bg-gray-700 text-gray-100 border-gray-600' : 'bg-white text-gray-900 border-gray-200'}`}>
+                                        <div className="flex items-center space-x-2">
+                                            <Loader className="w-5 h-5 animate-spin text-blue-600" />
+                                            <span className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                                                Agent is processing...
+                                            </span>
                                         </div>
                                     </div>
-                                ))}
-                            </div>
+                                </div>
+                            )}
                         </div>
 
-                        {/* Chat Interface */}
-                        <div className={`flex-1 ${cardClass} flex flex-col h-full`}>
-                            <div className={`flex items-center p-4 border-b flex-shrink-0 ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-                                <h2 className={`text-lg font-semibold ${textClass}`}>
-                                    {activeAgent?.name || 'Select an Agent'}
-                                </h2>
-                                <div className="ml-auto flex items-center space-x-4">
-                                </div>
+                        {/* Message Input Area */}
+                        <div className={`p-6 border-t flex-shrink-0 ${isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
+                            <div className="flex items-center space-x-3">
+                                <input
+                                    type="text"
+                                    value={currentMessage}
+                                    onChange={(e) => setCurrentMessage(e.target.value)}
+                                    onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+                                    placeholder={activeAgent.id === 'gcloud-command-executor' ? 'Enter a gcloud command...' : 'Ask something...'}
+                                    className={`flex-1 px-5 py-3 border rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/50 focus:border-blue-500 transition-all duration-300 ${inputClass}`}
+                                    disabled={isLoading}
+                                />
+                                <button
+                                    onClick={handleSendMessage}
+                                    className={`p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 transform hover:scale-[1.05] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none`}
+                                    disabled={!currentMessage.trim() || isLoading}
+                                >
+                                    {isLoading ? <Loader className="w-6 h-6 animate-spin" /> : <Send className="w-6 h-6" />}
+                                </button>
                             </div>
-                            {/* Chat Messages */}
-                            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-                                {agentMessages.map((message) => (
-                                    message && message.id && (
-                                    <div
-                                        key={message.id}
-                                        className={`flex transition-all duration-300 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                        <div className={`max-w-3xl p-4 rounded-xl shadow-lg animate-fade-in ${
-                                            message.type === 'user'
-                                                ? 'bg-blue-600 text-white rounded-br-none'
-                                                : isDarkMode ? 'bg-gray-700 text-gray-100 rounded-tl-none border border-gray-600' : 'bg-white text-gray-900 rounded-tl-none border border-gray-200 shadow-md'
-                                        }`}>
-                                            <div className={`leading-relaxed whitespace-pre-wrap ${message.type === 'user' ? 'text-white' : textClass}`}>
-                                                {typeof message.content === 'string' ? message.content : JSON.stringify(message.content)}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    )
-                                ))}
-
-                                {isLoading && (
-                                    <div className="flex justify-start">
-                                        <div className={`max-w-2xl p-4 rounded-xl shadow-md rounded-tl-none border animate-pulse-fade ${isDarkMode ? 'bg-gray-700 text-gray-100 border-gray-600' : 'bg-white text-gray-900 border-gray-200'}`}>
-                                            <div className="flex items-center space-x-2">
-                                                <Loader className="w-5 h-5 animate-spin text-blue-600" />
-                                                <span className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
-                                                    AI Agents are typing...
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Message Input Area */}
-                            <div className={`p-6 border-t flex-shrink-0 ${isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
-                                {uploadedFiles.length > 0 && (
-                                    <div className="mb-3 flex flex-wrap gap-2">
-                                        {uploadedFiles.map((file, index) => (
-                                            <div key={index} className={`flex items-center space-x-2 px-3 py-1 rounded-full border text-xs ${
-                                                isDarkMode ? 'bg-gray-700 border-gray-600 text-gray-300' : 'bg-gray-100 border-gray-300 text-gray-700'
-                                            }`}>
-                                                <Paperclip className="w-3 h-3" />
-                                                <span className="truncate max-w-[100px]">{file.name}</span>
-                                                <button
-                                                    onClick={() => removeFile(index)}
-                                                    className="p-0.5 rounded-full hover:bg-gray-400 transition-colors text-gray-500 hover:text-white"
-                                                >
-                                                    <X className="w-3 h-3" />
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div className="flex items-center space-x-3">
-                                    <input
-                                        type="file"
-                                        ref={fileInputRef}
-                                        onChange={handleFileUpload}
-                                        multiple
-                                        className="hidden"
-                                    />
-                                    <button
-                                        onClick={() => fileInputRef.current?.click()}
-                                        className={`p-3 rounded-xl transition-colors ${
-                                            isDarkMode ? 'text-gray-400 hover:bg-gray-700' : 'text-gray-500 hover:bg-gray-100'
-                                        } disabled:opacity-50`}
-                                        disabled={isLoading}
-                                    >
-                                        <Paperclip className="w-5 h-5" />
-                                    </button>
-                                    
-                                    <input
-                                        type="text"
-                                        value={currentMessage}
-                                        onChange={(e) => setCurrentMessage(e.target.value)}
-                                        onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-                                        placeholder="Ask something...."
-                                        className={`flex-1 px-5 py-3 border rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/50 focus:border-blue-500 transition-all duration-300 ${inputClass}`}
-                                        disabled={isLoading}
-                                    />
-                                    <button
-                                        onClick={handleSendMessage}
-                                        className={`p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all duration-200 transform hover:scale-[1.05] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none`}
-                                        disabled={(!currentMessage.trim() && uploadedFiles.length === 0) || isLoading}
-                                    >
-                                        {isLoading ? <Loader className="w-6 h-6 animate-spin" /> : <Send className="w-6 h-6" />}
-                                    </button>
-                                </div>
-                                <div className="flex items-center justify-center mt-3">
-                                    <p className={`text-xs ${textSecondaryClass}`}>
-                                     Wipro 2025
-                                    </p>
-                                </div>
+                             <div className="flex items-center justify-center mt-3">
+                                <p className={`text-xs ${textSecondaryClass}`}>
+                                 Wipro 2025
+                                </p>
                             </div>
                         </div>
                     </div>
-                )}
+                </div>
             </main>
         </div>
     );
