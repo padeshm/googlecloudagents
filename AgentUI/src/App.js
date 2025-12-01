@@ -32,8 +32,9 @@ const ChatbotTemplate = () => {
         {
             id: 'gcloud-command-executor',
             name: 'Google Cloud Command Executor',
+            description: 'I translate natural language into gcloud commands and execute them.', // Added description
             messages: [
-                { id: 1, type: 'bot', content: "GCloud Command Executor ready. Please provide a `gcloud` command to run (e.g., 'compute instances list').", timestamp: new Date().toISOString() }
+                { id: 1, type: 'bot', content: "Hello! I can execute gcloud commands for you. What would you like to do? (e.g., 'list my compute instances')", timestamp: new Date().toISOString() } // Updated message
             ],
             endpoint: 'https://gcloud-mcp-server-652176787350.us-central1.run.app/api/gcloud'
         }
@@ -110,6 +111,7 @@ const ChatbotTemplate = () => {
         });
     };
 
+    // --- UPDATED `handleSendMessage` function ---
     const handleSendMessage = async () => {
         if (!activeAgent || currentMessage.trim() === '' || !user || !gcpAccessToken) {
             if (!gcpAccessToken) alert("GCP Access Token is missing. Please sign in again.");
@@ -136,9 +138,10 @@ const ChatbotTemplate = () => {
         try {
             const isCommandExecutor = activeAgent.id === 'gcloud-command-executor';
 
-            const requestBody = isCommandExecutor
-                ? { command: messageToSend }
-                : { prompt: messageToSend, history: activeAgent.messages };
+            // The request body now sends a "prompt" for both agents.
+            // The `gcloud-command-executor` backend will use the prompt and ignore the history.
+            // The `google-cloud-helper` backend will use both.
+            const requestBody = { prompt: messageToSend, history: activeAgent.messages };
 
             const response = await fetch(activeAgent.endpoint, {
                 method: 'POST',
@@ -152,11 +155,12 @@ const ChatbotTemplate = () => {
             const data = await response.json();
 
             if (!response.ok) {
-                 // Use the error message from the backend response if available
                 throw new Error(data.response || data.error || `HTTP error! status: ${response.status}`);
             }
 
+            // The response HANDLING is still conditional because the two backends return different data structures.
             if (isCommandExecutor) {
+                // Node.js backend returns a single response object: { response: "..." }
                 const botMessage = {
                     id: Date.now() + 1,
                     type: 'bot',
@@ -168,7 +172,7 @@ const ChatbotTemplate = () => {
                 ));
 
             } else {
-                // For conversational agent, the backend returns the whole history
+                // Python backend returns the entire updated history: { history: [...] }
                 setAgents(prevAgents => prevAgents.map(agent =>
                     agent.id === currentAgentId ? { ...agent, messages: data.history } : agent
                 ));
@@ -362,7 +366,7 @@ const ChatbotTemplate = () => {
                                     value={currentMessage}
                                     onChange={(e) => setCurrentMessage(e.target.value)}
                                     onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-                                    placeholder={activeAgent.id === 'gcloud-command-executor' ? 'Enter a gcloud command...' : 'Ask something...'}
+                                    placeholder={"Ask something..."} // Updated placeholder
                                     className={`flex-1 px-5 py-3 border rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/50 focus:border-blue-500 transition-all duration-300 ${inputClass}`}
                                     disabled={isLoading}
                                 />
