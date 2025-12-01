@@ -55,10 +55,8 @@ app.post("/api/gcloud", async (req, res) => {
         const result = await generativeModel.generateContent(llmPrompt);
         const response = result.response;
 
-        // THE FINAL FIX: Use optional chaining (?.) for robust, safe access.
         const text = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 
-        // Now, we can safely check if we got any text.
         if (!text) {
             console.error("[Vertex AI] Error: No valid text returned from the model.", JSON.stringify(response));
             return res.status(500).json({ response: "The AI model returned an invalid or empty response." });
@@ -124,7 +122,7 @@ let transport: SSEServerTransport;
 app.get("/sse", async (req, res) => {
   console.log("Client connected via SSE");
   transport = new SSEServerTransport("/messages", res);
-a  await server.connect(transport);
+  await server.connect(transport);
 });
 
 app.post("/messages", async (req, res) => {
