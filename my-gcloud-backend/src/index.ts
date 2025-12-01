@@ -20,7 +20,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- UPDATED REST Endpoint for AgentUI with Natural Language Summarization ---
+// --- UPDATED REST Endpoint for AgentUI with Project-Aware Logic ---
 app.post("/api/gcloud", async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -33,16 +33,20 @@ app.post("/api/gcloud", async (req, res) => {
         return res.status(400).json({ response: 'Prompt not provided in the request body' });
     }
 
-    // --- STEP 1: Translate the natural language prompt into a gcloud command ---
+    // --- STEP 1: Translate the prompt into a command or ask for clarification ---
     let gcloudCommand;
     try {
         const commandGenPrompt = `
         You are an expert in the Google Cloud CLI (gcloud).
-        Translate the following user request into a single, executable gcloud command.
-        - Only output the gcloud command itself.
-        - Do not include any explanation, preamble, or markdown formatting.
-        - Do not include the "gcloud" prefix in the command.
-        - If the request is ambiguous, too complex, or cannot be translated into a gcloud command, respond with the single word "ERROR".
+        Your task is to translate a user's request into a single, executable gcloud command.
+
+        Follow these rules carefully:
+        1.  **Check for Project ID:** Analyze the user's request. If the command you generate absolutely requires a project context (like listing resources) AND the user has NOT provided a project ID or name, you MUST respond with the single keyword: NEEDS_PROJECT
+        2.  **Generate Command:** If a project ID is not needed, or if the user HAS provided a project ID, translate the request into a gcloud command.
+            - Only output the gcloud command itself.
+            - Do not include the "gcloud" prefix.
+            - If a project was mentioned by the user, ensure you include the \`--project <project_id>\` flag in your generated command.
+        3.  **Handle Ambiguity:** If the request is ambiguous, too complex, or cannot be translated, respond with the single word: ERROR
 
         User Request: "${userPrompt}"
 
@@ -57,9 +61,15 @@ app.post("/api/gcloud", async (req, res) => {
             return res.status(500).json({ response: "The AI model returned an invalid or empty response for command generation." });
         }
 
+        // NEW: Check if the model is asking for a project.
+        if (text === "NEEDS_PROJECT") {
+            return res.json({ response: "I can do that. For which project would you like me to get this information?" });
+        }
+
         if (text === "ERROR") {
             return res.status(400).json({ response: `I'm sorry, but I couldn't translate that request into a specific gcloud command. Please try rephrasing your request.` });
         }
+        
         gcloudCommand = text;
         console.log(`[Vertex AI] Generated command: 'gcloud ${gcloudCommand}'`);
 
@@ -90,11 +100,9 @@ app.post("/api/gcloud", async (req, res) => {
     // --- STEP 3: Summarize the output or return the error ---
     child.on("close", async (code) => {
         if (code !== 0) {
-            // If the command failed, return the raw error.
             return res.status(400).json({ response: `Gcloud Error (Exit Code ${code}):\n${error || `Command: gcloud ${gcloudCommand}`}` });
         }
 
-        // If the command succeeded, proceed to summarization.
         try {
             const summarizationPrompt = `
             You are a helpful Google Cloud assistant.
@@ -116,16 +124,13 @@ app.post("/api/gcloud", async (req, res) => {
 
             if (!summary) {
                 console.error("[Vertex AI] Error: Summarization model returned invalid response.", JSON.stringify(response));
-                // Fallback to sending the raw output if summarization fails.
                 return res.json({ response: `> Executed: gcloud ${gcloudCommand}\\n\\n${output}` });
             }
             
-            // Send the final, summarized response.
             res.json({ response: summary });
 
         } catch (summarizationError: any) {
             console.error("[Vertex AI] Error during summarization:", summarizationError);
-            // If summarization fails, fall back to sending the raw output as a last resort.
             res.status(500).json({
                 response: `I was able to run the command, but I encountered an error while trying to summarize the results. Here is the raw output:\\n\\n> Executed: gcloud ${gcloudCommand}\\n\\n${output}`
             });
