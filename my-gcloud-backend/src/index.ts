@@ -7,7 +7,24 @@ import { Content, VertexAI } from '@google-cloud/vertexai';
 // --- Initialize Vertex AI and Express --- 
 const vertex_ai = new VertexAI({ project: process.env.GCLOUD_PROJECT, location: 'us-central1' });
 const model = 'gemini-2.5-flash';
-const generativeModel = vertex_ai.preview.getGenerativeModel({ model: model });
+
+// --- AGENT BRAIN 1: The Command Generator ---
+const generativeModel = vertex_ai.preview.getGenerativeModel({ 
+    model: model,
+    systemInstruction: {
+        role: 'system',
+        parts: [{
+            text: `You are a Google Cloud Platform expert, and your one and only goal is to generate a complete, executable gcloud command based on a user's request.
+
+RULES:
+- YOU MUST take into account the user's conversation history to understand the full context of their request.
+- The user's latest message is often the final piece of information needed to complete a command from a previous turn. You MUST combine information from the history and the latest message to form a single, complete command.
+- If a project ID is required to run the command and has not been provided in the history or the latest prompt, you MUST return the single keyword: NEEDS_PROJECT
+- If the request, even with the full history, is ambiguous, impossible, or cannot be translated into a gcloud command, you MUST return the single keyword: ERROR
+- Your final output MUST be only the gcloud command itself, without the 'gcloud' prefix.`
+        }]
+    }
+});
 
 const app = express();
 app.use(cors());
@@ -31,32 +48,8 @@ app.post("/api/gcloud", async (req, res) => {
     // --- STEP 1: Translate prompt to command, using conversation history for context ---
     let gcloudCommand;
     try {
-        const commandGenPrompt = {
-            // Pass the prior conversation history to the model
-            history: history as Content[],
-            contents: [{
-                role: 'user',
-                parts: [{
-                    text: `You are an expert in the Google Cloud CLI (gcloud).
-                    Your task is to analyze the user's newest request in the context of the prior conversation history and translate it into a single, executable gcloud command.
-
-                    Follow these rules carefully:
-                    1.  **Use History:** Use the conversation history to resolve context (e.g., if the user says "what about for that project?", use the project from the history).
-                    2.  **Check for Project ID:** If the command you generate absolutely requires a project context AND the user has NOT provided one (either in the new prompt or in the history), you MUST respond with the single keyword: NEEDS_PROJECT
-                    3.  **Generate Command:** If a project ID is not needed, or if one is available in the context, translate the request into a gcloud command.
-                        - Only output the gcloud command itself.
-                        - Do not include the "gcloud" prefix.
-                        - If a project context is available, ensure you include the \`--project <project_id>\` flag in your generated command.
-                    4.  **Handle Ambiguity:** If the request is ambiguous, too complex, or cannot be translated into a gcloud command even with the history, respond with the single word: ERROR
-
-                    Newest User Request: "${userPrompt}"
-
-                    Resulting Command:`
-                }]
-            }]
-        };
-
-        const result = await generativeModel.generateContent(commandGenPrompt);
+        const chat = generativeModel.startChat({ history: history as Content[] });
+        const result = await chat.sendMessage(userPrompt);
         const text = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 
         if (!text) {
@@ -91,41 +84,51 @@ app.post("/api/gcloud", async (req, res) => {
     child.stderr.on("data", (data) => (error += data.toString()));
     child.on("error", (err) => res.status(500).json({ response: `System Error: Failed to start gcloud process. Error: ${err.message}` }));
 
-    // --- STEP 3: Summarize the output, using conversation history for context ---
+    // --- STEP 3: Summarize success OR interpret failure ---
     child.on("close", async (code) => {
         if (code !== 0) {
-            return res.status(400).json({ response: `Gcloud Error (Exit Code ${code}):\n${error || `Command: gcloud ${gcloudCommand}`}` });
+            // --- NEW: Handle FAILURE by having the AI interpret the error ---
+            console.error(`[gcloud] Command failed with exit code ${code}:`, error);
+            try {
+                const errorAnalyzerModel = vertex_ai.preview.getGenerativeModel({
+                    model: model,
+                    systemInstruction: {
+                        role: 'system',
+                        parts: [{
+                            text: `You are a helpful Google Cloud assistant. A gcloud command has failed. Your goal is to explain the technical error message to a user in a simple, human-readable way.
+
+RULES:
+- DO NOT show the user the raw error message.
+- Analyze the error and explain the likely root cause.
+- If the error indicates a project was not found, a typo in the project name, or a permissions issue like SERVICE_DISABLED or PERMISSION_DENIED, tell the user to check that their project ID is correct and that they have the necessary permissions.
+- If the error mentions enabling an API, explain that a specific service needs to be activated for their project.
+- Provide a clear, concise, and friendly explanation of the problem and suggest a solution.`
+                        }]
+                    }
+                });
+                const result = await errorAnalyzerModel.generateContent(error);
+                const friendlyError = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+                return res.status(400).json({ response: friendlyError || `The command failed, and I was unable to determine the cause.` });
+
+            } catch (analysisError: any) {
+                console.error("[Vertex AI] Error during error analysis:", analysisError);
+                return res.status(500).json({ response: `The command failed, and I was unable to analyze the error. Here is the raw error:\n\n${error}` });
+            }
         }
 
+        // --- Handle SUCCESS (this part is now for success cases only) ---
         try {
-            // We create a new history that includes the latest user prompt and the command that was just run.
-            const fullHistory = [...history, 
-                { role: 'user', parts: [{ text: userPrompt }] },
-                // This tells the summarizer what action it just took.
-                { role: 'model', parts: [{ text: `Okay, I am running the command: gcloud ${gcloudCommand}` }] },
-            ];
-
-            const summarizationPrompt = {
-                history: fullHistory,
-                contents: [{
-                    role: 'user', // The 'user' in this case is the system, providing the gcloud output.
-                    parts: [{
-                        text: `Here is the output from that command:
-                        \`\`\`
-                        ${output}
-                        \`\`\`
-                        Summarize this output in a helpful, conversational way. Do not mention the command you ran.`
-                    }]
-                }]
-            };
-            
-            const result = await generativeModel.generateContent(summarizationPrompt);
+            const summarizerModel = vertex_ai.preview.getGenerativeModel({
+                model: model,
+                systemInstruction: {
+                    role: 'system',
+                    parts: [{ text: `You are a helpful Google Cloud assistant. Your goal is to summarize the output of a gcloud command in a clear, conversational way. Do not mention the command that was run.` }]
+                }
+            });
+            const chat = summarizerModel.startChat({ history: [...history, { role: 'user', parts: [{ text: userPrompt }] }] });
+            const result = await chat.sendMessage(`Here is the command output:\n\n${output}`);
             const summary = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-
-            if (!summary) {
-                return res.json({ response: `> Executed: gcloud ${gcloudCommand}\n\n${output}` });
-            }
-            res.json({ response: summary });
+            res.json({ response: summary || output });
 
         } catch (summarizationError: any) {
             console.error("[Vertex AI] Error during summarization:", summarizationError);
