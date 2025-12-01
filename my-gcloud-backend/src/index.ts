@@ -2,17 +2,19 @@
 import express from "express";
 import cors from "cors";
 import { spawn } from "child_process";
-import { GoogleGenerativeAI } from "@google/generative-ai"; // Import Gemini
+import { VertexAI } from '@google-cloud/vertexai'; 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { runGcloudCommand } from "./tools/run_gcloud_command.js";
 
 
-// --- Initialize Gemini ---
-// For this to work, you must enable the "generativeai.googleapis.com" API in your Google Cloud project.
-// When running on Google Cloud (like Cloud Run), the environment authenticates automatically.
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+// Initialize the correct Vertex AI client
+const vertex_ai = new VertexAI({ location: 'us-central1' });
+const model = 'gemini-2.5-flash'; // Use the model identifier for the Vertex AI SDK
+
+const generativeModel = vertex_ai.preview.getGenerativeModel({
+    model: model,
+});
 
 
 // Initialize Express
@@ -50,18 +52,26 @@ app.post("/api/gcloud", async (req, res) => {
 
         Resulting Command:`;
 
-        const result = await model.generateContent(llmPrompt);
-        const response = await result.response;
-        const text = response.text().trim();
+        const result = await generativeModel.generateContent(llmPrompt);
+        const response = result.response;
+
+        // THE FINAL FIX: Use optional chaining (?.) for robust, safe access.
+        const text = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+        // Now, we can safely check if we got any text.
+        if (!text) {
+            console.error("[Vertex AI] Error: No valid text returned from the model.", JSON.stringify(response));
+            return res.status(500).json({ response: "The AI model returned an invalid or empty response." });
+        }
 
         if (text === "ERROR") {
             return res.status(400).json({ response: `I'm sorry, but I couldn't translate that request into a specific gcloud command. Please try rephrasing your request.` });
         }
         gcloudCommand = text;
-        console.log(`[Gemini] Generated command: 'gcloud ${gcloudCommand}'`); // Log for debugging
+        console.log(`[Vertex AI] Generated command: 'gcloud ${gcloudCommand}'`); // Log for debugging
 
     } catch (error: any) {
-        console.error("[Gemini] Error calling the API:", error);
+        console.error("[Vertex AI] Error calling the API:", error);
         return res.status(500).json({ response: `There was an error communicating with the AI model: ${error.message}` });
     }
 
