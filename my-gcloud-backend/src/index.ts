@@ -48,7 +48,13 @@ app.post("/api/gcloud", async (req, res) => {
     // --- STEP 1: Translate prompt to command, using conversation history for context ---
     let gcloudCommand;
     try {
-        const chat = generativeModel.startChat({ history: history as Content[] });
+        // --- FIX: Transform client-side history to the Vertex AI SDK format ---
+        const transformedHistory = history.map((msg: any) => ({
+            role: msg.type === 'user' ? 'user' : 'model',
+            parts: [{ text: msg.content }]
+        })).filter((msg: any) => msg.parts[0].text && msg.role);
+
+        const chat = generativeModel.startChat({ history: transformedHistory as Content[] });
         const result = await chat.sendMessage(userPrompt);
         const text = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 
@@ -87,7 +93,7 @@ app.post("/api/gcloud", async (req, res) => {
     // --- STEP 3: Summarize success OR interpret failure ---
     child.on("close", async (code) => {
         if (code !== 0) {
-            // --- NEW: Handle FAILURE by having the AI interpret the error ---
+            // --- Handle FAILURE by having the AI interpret the error ---
             console.error(`[gcloud] Command failed with exit code ${code}:`, error);
             try {
                 const errorAnalyzerModel = vertex_ai.preview.getGenerativeModel({
@@ -125,7 +131,14 @@ RULES:
                     parts: [{ text: `You are a helpful Google Cloud assistant. Your goal is to summarize the output of a gcloud command in a clear, conversational way. Do not mention the command that was run.` }]
                 }
             });
-            const chat = summarizerModel.startChat({ history: [...history, { role: 'user', parts: [{ text: userPrompt }] }] });
+
+            // --- FIX: Use the same history transformation for the summarizer ---
+            const transformedHistory = history.map((msg: any) => ({
+                role: msg.type === 'user' ? 'user' : 'model',
+                parts: [{ text: msg.content }]
+            })).filter((msg: any) => msg.parts[0].text && msg.role);
+
+            const chat = summarizerModel.startChat({ history: [...transformedHistory, { role: 'user', parts: [{ text: userPrompt }] }] });
             const result = await chat.sendMessage(`Here is the command output:\n\n${output}`);
             const summary = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
             res.json({ response: summary || output });
