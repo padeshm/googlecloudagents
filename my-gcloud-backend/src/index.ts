@@ -1,40 +1,122 @@
 #!/usr/bin/env node
 import express from "express";
 import cors from "cors";
+import { spawn } from "child_process";
+import { GoogleGenerativeAI } from "@google/generative-ai"; // Import Gemini
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { runGcloudCommand } from "./tools/run_gcloud_command.js";
 
+
+// --- Initialize Gemini ---
+// For this to work, you must enable the "generativeai.googleapis.com" API in your Google Cloud project.
+// When running on Google Cloud (like Cloud Run), the environment authenticates automatically.
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+
 // Initialize Express
 const app = express();
 app.use(cors());
+app.use(express.json()); // Add JSON body parser to read request bodies
 
-// Initialize MCP Server
+// --- UPDATED REST Endpoint for AgentUI ---
+app.post("/api/gcloud", async (req, res) => {
+    // 1. Authenticate and get token for impersonation (unchanged)
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ response: 'Authorization (Access Token) not provided or invalid' });
+    }
+    const accessToken = authHeader.split(' ')[1];
+
+    // 2. Get the NATURAL LANGUAGE PROMPT from the request body
+    const { prompt } = req.body;
+    if (!prompt) {
+        return res.status(400).json({ response: 'Prompt not provided in the request body' });
+    }
+
+    // 3. Use Gemini to translate the prompt into a gcloud command
+    let gcloudCommand;
+    try {
+        const llmPrompt = `
+        You are an expert in the Google Cloud CLI (gcloud).
+        Translate the following user request into a single, executable gcloud command.
+        - Only output the gcloud command itself.
+        - Do not include any explanation, preamble, or markdown formatting.
+        - Do not include the "gcloud" prefix in the command.
+        - If the request is ambiguous, too complex, or cannot be translated into a gcloud command, respond with the single word "ERROR".
+
+        User Request: "${prompt}"
+
+        Resulting Command:`;
+
+        const result = await model.generateContent(llmPrompt);
+        const response = await result.response;
+        const text = response.text().trim();
+
+        if (text === "ERROR") {
+            return res.status(400).json({ response: `I'm sorry, but I couldn't translate that request into a specific gcloud command. Please try rephrasing your request.` });
+        }
+        gcloudCommand = text;
+        console.log(`[Gemini] Generated command: 'gcloud ${gcloudCommand}'`); // Log for debugging
+
+    } catch (error: any) {
+        console.error("[Gemini] Error calling the API:", error);
+        return res.status(500).json({ response: `There was an error communicating with the AI model: ${error.message}` });
+    }
+
+    // 4. Spawn gcloud with the user's token and the GENERATED command
+    const args = gcloudCommand.split(" ");
+    const child = spawn("gcloud", args, {
+      env: {
+        ...process.env,
+        CLOUDSDK_CORE_DISABLE_PROMPTS: "1",
+        CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken
+      },
+    });
+
+    let output = "";
+    let error = "";
+
+    child.stdout.on("data", (data) => (output += data.toString()));
+    child.stderr.on("data", (data) => (error += data.toString()));
+
+    child.on("close", (code) => {
+      // 5. Send back a unified response
+      if (code !== 0) {
+        res.status(400).json({ response: `Gcloud Error (Exit Code ${code}):\n${error || `Command: gcloud ${gcloudCommand}`}` });
+      } else {
+        // On success, include the executed command in the response for clarity
+        res.json({ response: `> Executed: gcloud ${gcloudCommand}\n\n${output}` });
+      }
+    });
+
+    child.on("error", (err) => {
+      res.status(500).json({ response: `System Error: Failed to start gcloud process. Error: ${err.message}` });
+    });
+});
+
+
+// --- Existing MCP Server Logic (unchanged) ---
 const server = new McpServer({
   name: "gcloud-mcp-backend",
   version: "1.0.0",
 });
 
-// Register the Tool
-// We use the logic already present in the tool file, but register it here.
 server.tool(
   "run_gcloud_command",
-  runGcloudCommand.parameters, // We will need to slightly tweak the tool file to export this
+  runGcloudCommand.parameters,
   runGcloudCommand.execute
 );
 
-// --- HTTP ENDPOINTS ---
-
 let transport: SSEServerTransport;
 
-// SSE Endpoint (Client listens here)
 app.get("/sse", async (req, res) => {
   console.log("Client connected via SSE");
   transport = new SSEServerTransport("/messages", res);
   await server.connect(transport);
 });
 
-// Messages Endpoint (Client sends requests here)
 app.post("/messages", async (req, res) => {
   if (!transport) {
     res.status(500).send("Transport not initialized");
@@ -42,8 +124,12 @@ app.post("/messages", async (req, res) => {
   }
   await transport.handlePostMessage(req, res);
 });
+// --- End of Existing MCP Logic ---
+
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`MCP Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
+  console.log(`-> MCP SSE endpoint available at /sse`);
+  console.log(`-> AgentUI REST endpoint available at /api/gcloud`);
 });
