@@ -8,9 +8,9 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { runGcloudCommand } from "./tools/run_gcloud_command.js";
 
 
-// Initialize the correct Vertex AI client
-const vertex_ai = new VertexAI({ location: 'us-central1' });
-const model = 'gemini-2.5-flash'; // Use the model identifier for the Vertex AI SDK
+// Initialize the Vertex AI client, using an environment variable for the project ID.
+const vertex_ai = new VertexAI({ project: process.env.GCLOUD_PROJECT, location: 'us-central1' });
+const model = 'gemini-2.5-flash'; // Using the model you specified.
 
 const generativeModel = vertex_ai.preview.getGenerativeModel({
     model: model,
@@ -124,7 +124,7 @@ let transport: SSEServerTransport;
 app.get("/sse", async (req, res) => {
   console.log("Client connected via SSE");
   transport = new SSEServerTransport("/messages", res);
-  await server.connect(transport);
+a  await server.connect(transport);
 });
 
 app.post("/messages", async (req, res) => {
