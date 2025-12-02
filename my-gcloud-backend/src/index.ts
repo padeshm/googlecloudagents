@@ -55,7 +55,6 @@ app.post("/api/gcloud", async (req, res) => {
             return res.status(500).json({ response: "The AI model returned an invalid response." });
         }
 
-        // --- NEW: More specific error handling ---
         if (text === "NEEDS_PROJECT") {
             return res.json({ response: "I can do that. For which project would you like me to get this information?" });
         }
@@ -85,9 +84,6 @@ app.post("/api/gcloud", async (req, res) => {
         return res.status(500).json({ response: `Error communicating with the AI model: ${error.message}` });
     }
     
-    // --- STEP 2: Execute the generated command with security checks ---
-    
-    // **THE INTENDED FIX:** Map tool names to their absolute paths guaranteed by the Dockerfile.
     const toolPaths: { [key: string]: string } = {
         'gcloud': '/usr/bin/gcloud',
         'gsutil': '/usr/bin/gsutil',
@@ -102,7 +98,6 @@ app.post("/api/gcloud", async (req, res) => {
     }
 
     const args = command.split(" ");
-    // Use the absolute path in the spawn call.
     const child = spawn(executablePath, args, {
         env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1", CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken },
     });
@@ -112,7 +107,6 @@ app.post("/api/gcloud", async (req, res) => {
     child.stdout.on("data", (data) => (output += data.toString()));
     child.stderr.on("data", (data) => (error += data.toString()));
     child.on("error", (err) => {
-        // This error is now more specific, e.g., "spawn /usr/bin/bq ENOENT" (Error NO ENTity)
         console.error(`[SPAWN] System Error: Failed to start command '${executablePath}'. Error: ${err.message}`);
         res.status(500).json({ response: `System Error: Failed to start the command process. Please ensure the execution environment is set up correctly.` })
     });
@@ -120,26 +114,12 @@ app.post("/api/gcloud", async (req, res) => {
     // --- STEP 3: Summarize success OR interpret failure ---
     child.on("close", async (code) => {
         if (code !== 0) {
-            // --- Handle FAILURE by having the AI interpret the error ---
-            console.error(`[${tool}] Command failed with exit code ${code}:`, error);
-            try {
-                const errorAnalyzerModel = vertex_ai.preview.getGenerativeModel({
-                    model: model,
-                    systemInstruction: {
-                        role: 'system',
-                        parts: [{
-                            text: `You are a helpful Google Cloud assistant. A command has failed. Your goal is to explain the technical error message to a user in a simple, human-readable way. RULES: Do not show the user the raw error message. Analyze the error and explain the likely root cause. Provide a clear, concise, and friendly explanation of the problem and suggest a solution. If the error indicates a missing flag (like --location), be sure to mention it.`
-                        }]
-                    }
-                });
-                const result = await errorAnalyzerModel.generateContent(error);
-                const friendlyError = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-                return res.status(400).json({ response: friendlyError || `The command failed, and I was unable to determine the cause.` });
-
-            } catch (analysisError: any) {
-                console.error("[Vertex AI] Error during error analysis:", analysisError);
-                return res.status(500).json({ response: `The command failed, and I was unable to analyze the error. Here is the raw error:\n\n${error}` });
-            }
+            // --- TEMPORARY DEBUGGING STEP: Return the raw error to the UI ---
+            console.error(`[${tool}] Command failed with exit code ${code}. Raw stderr:`);
+            console.error(error);
+            return res.status(400).json({ 
+                response: `The command failed with a technical error. Please provide this exact error to the support team:\n\n--- BEGIN RAW ERROR ---\n${error}\n--- END RAW ERROR ---` 
+            });
         }
 
         // --- Handle SUCCESS (this part is now for success cases only) ---
