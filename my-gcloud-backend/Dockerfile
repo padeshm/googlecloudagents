@@ -2,13 +2,11 @@
 FROM node:20-slim
 
 # 1. Install System Dependencies & kubectl
-# Based on official Kubernetes documentation
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
     gnupg \
     python3 && \
-    # Add Kubernetes repository and install kubectl
     mkdir -p -m 755 /etc/apt/keyrings && \
     curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg && \
     echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /' | tee /etc/apt/sources.list.d/kubernetes.list && \
@@ -25,7 +23,6 @@ RUN curl -O ${GCLOUD_SDK_URL} && \
     tar -xf google-cloud-cli-${GCLOUD_SDK_VERSION}-linux-x86_64.tar.gz && \
     rm google-cloud-cli-${GCLOUD_SDK_VERSION}-linux-x86_64.tar.gz && \
     ./google-cloud-sdk/install.sh --quiet --usage-reporting=false --path-update=true && \
-    # Create symbolic links to make tools available system-wide
     ln -s /google-cloud-sdk/bin/gcloud /usr/bin/gcloud && \
     ln -s /google-cloud-sdk/bin/bq /usr/bin/bq && \
     ln -s /google-cloud-sdk/bin/gsutil /usr/bin/gsutil
@@ -47,5 +44,16 @@ COPY src ./src
 # Build TypeScript to JavaScript
 RUN npm run build
 
-# 4. Start the Server
-CMD ["npm", "start"]
+# 4. Start the Server with Diagnostics
+# This will run our debug commands first, then start the server.
+CMD echo "--- RUNNING DIAGNOSTICS ---" && \
+    echo "1. Checking symbolic link..." && \
+    ls -l /usr/bin/bq && \
+    echo "2. Checking actual executable..." && \
+    ls -l /google-cloud-sdk/bin/bq && \
+    echo "3. Checking PATH variable..." && \
+    echo $PATH && \
+    echo "4. Testing bq command via absolute path..." && \
+    /usr/bin/bq --version && \
+    echo "--- DIAGNOSTICS COMPLETE, STARTING SERVER ---" && \
+    npm start
