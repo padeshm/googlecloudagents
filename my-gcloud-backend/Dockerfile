@@ -1,21 +1,33 @@
 # Use a lightweight Node image
 FROM node:20-slim
 
-# 1. Install System Dependencies required for Gcloud SDK (Python, Curl)
+# 1. Install System Dependencies required for Gcloud SDK
 RUN apt-get update && apt-get install -y \
     python3 \
     curl \
     gnupg \
+    # Install kubectl separately, as it's a standard k8s tool
+    kubectl \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Install Google Cloud CLI, its components, and kubectl
-RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
-    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - && \
-    apt-get update && \
-    # Install the core CLI and kubectl first
-    apt-get install -y google-cloud-cli kubectl && \
-    # Now, use the gcloud command itself to install the necessary components
-    gcloud components install bq -q
+# 2. Manually Install the Google Cloud SDK for full control
+
+# Set the version and download URL
+ENV GCLOUD_SDK_VERSION=468.0.0
+ENV GCLOUD_SDK_URL="https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-${GCLOUD_SDK_VERSION}-linux-x86_64.tar.gz"
+
+# Download, extract, and install
+RUN curl -O ${GCLOUD_SDK_URL} && \
+    tar -xf google-cloud-cli-${GCLOUD_SDK_VERSION}-linux-x86_64.tar.gz && \
+    rm google-cloud-cli-${GCLOUD_SDK_VERSION}-linux-x86_64.tar.gz && \
+    ./google-cloud-sdk/install.sh --quiet --usage-reporting=false --path-update=true && \
+    # Ensure the PATH is correctly set for subsequent RUN commands
+    ln -s /google-cloud-sdk/bin/gcloud /usr/bin/gcloud && \
+    ln -s /google-cloud-sdk/bin/bq /usr/bin/bq && \
+    ln -s /google-cloud-sdk/bin/gsutil /usr/bin/gsutil
+
+# Add gcloud to the PATH for all future sessions
+ENV PATH /google-cloud-sdk/bin:$PATH
 
 # 3. Application Setup
 WORKDIR /app
@@ -32,5 +44,4 @@ COPY src ./src
 RUN npm run build
 
 # 4. Start the Server
-# Cloud Run injects the PORT environment variable
 CMD ["npm", "start"]
