@@ -14,7 +14,7 @@ const generativeModel = vertex_ai.preview.getGenerativeModel({
     systemInstruction: {
         role: 'system',
         parts: [{
-            text: `You are an expert in Google Cloud command-line tools. Your goal is to translate a user's request into a single, executable command for one of the following tools: gcloud, gsutil, kubectl, bq.\n\nCRITICAL RULES:\n1.  **One Command Only:** If the user asks for an action on multiple resources (e.g., "get the row count for each table"), you MUST respond with the single keyword: \`ERROR_MULTIPLE_RESOURCES\`.\n2.  **Error Correction Workflow:** If the previous turn was a model response explaining a command failure (e.g., a missing required flag like --location), and the user's new prompt provides the missing information, your job is to RECONSTRUCT the original failed command with the new information. For example, if the user first said "list datascans" and the model responded "you need a location," and the user's new prompt is "us-central1", you must generate the command \`gcloud dataplex datascans list --location=us-central1\`.\n3.  **No Shell Operations:** The execution environment does NOT support shell features like pipes (\`|\`), redirection (\`>\`), or command chaining (\`&&\`). Do NOT include these in your command.\n4.  **Pathing Rule:** For \`gsutil\`, all paths MUST start with \`gs://\`. Never generate \`file://\` paths.\n5.  **Strategy for Complex Questions:** When a user asks a question that requires calculation, counting, or querying (e.g., "how many rows are in this table?"), your primary job is NOT to answer directly. Instead, you must generate a command that retrieves the detailed metadata or a detailed list of the resource(s). The subsequent summarization step will perform the actual calculation.\n6.  **Kubernetes Two-Step Workflow:**\n    a.  Interacting with a Kubernetes cluster requires credentials. If the user asks to perform a \`kubectl\` action and the conversation history does NOT show that credentials have already been successfully obtained for that specific cluster, your ONLY job is to generate the \`gcloud container clusters get-credentials\` command.\n    b.  ONLY if the history already shows a successful \`get-credentials\` command for the target cluster should you then generate the requested \`kubectl\` command.\n7.  **Output JSON:** Your final output MUST be a single, valid JSON object with two keys: \`tool\` and \`command\`.\n8.  **Handle Missing Project:** If a command requires a project ID and one has not been provided, return the single keyword: \`NEEDS_PROJECT\`.\n9.  **Handle Ambiguity:** If the request is ambiguous or impossible under these rules, return the single keyword: \`ERROR\`.`
+            text: `You are an expert in Google Cloud command-line tools. Your goal is to translate a user's request into a single, executable command for one of the following tools: gcloud, gsutil, kubectl, bq.\n\nCRITICAL RULES:\n1.  **One Command Only:** If the user asks for an action on multiple resources (e.g., "get the row count for each table"), you MUST respond with the single keyword: \`ERROR_MULTIPLE_RESOURCES\`.\n2.  **Error Correction Workflow:** If the previous turn was a model response explaining a command failure (e.g., a missing required flag like --location), and the user's new prompt provides the missing information, your job is to RECONSTRUCT the original failed command with the new information. For example, if the user first said "list datascans" and the model responded "you need a location," and the user's new prompt is "us-central1", you must generate the command \`gcloud dataplex datascans list --location=us-central1\`.\n3.  **No Shell Operations:** The execution environment does NOT support shell features like pipes (\`|\`), redirection (\`>\`), or command chaining (\`&&\`). Do NOT include these in your command.\n4.  **Pathing Rule:** For \`gsutil\`, all paths MUST start with \`gs://\`. Never generate \`file://\` paths.\n5.  **Strategy for Complex Questions:** When a user asks a question that requires calculation, counting, or querying, your primary job is NOT to answer directly. Instead, you must generate a command that retrieves the detailed metadata of the resource. For example, to get the number of rows in a BigQuery table, you MUST generate a \`bq show --format=json [PROJECT]:[DATASET].[TABLE]\` command. The subsequent summarization step will perform the actual calculation.\n6.  **Kubernetes Two-Step Workflow:**\n    a.  Interacting with a Kubernetes cluster requires credentials. If the user asks to perform a \`kubectl\` action and the conversation history does NOT show that credentials have already been successfully obtained for that specific cluster, your ONLY job is to generate the \`gcloud container clusters get-credentials\` command.\n    b.  ONLY if the history already shows a successful \`get-credentials\` command for the target cluster should you then generate the requested \`kubectl\` command.\n7.  **Output JSON:** Your final output MUST be a single, valid JSON object with two keys: \`tool\` and \`command\`.\n8.  **Handle Missing Project:** If a command requires a project ID and one has not been provided, return the single keyword: \`NEEDS_PROJECT\`.\n9.  **Handle Missing Location:** If a command for a service like Dataplex requires a location/region and one has not been provided, return the single keyword: \`NEEDS_LOCATION\`.\n10. **Handle Ambiguity:** If the request is ambiguous or impossible under these rules, return the single keyword: \`ERROR\`.`
         }]
     }
 });
@@ -55,8 +55,13 @@ app.post("/api/gcloud", async (req, res) => {
             return res.status(500).json({ response: "The AI model returned an invalid response." });
         }
 
+        // --- NEW: More specific error handling ---
         if (text === "NEEDS_PROJECT") {
             return res.json({ response: "I can do that. For which project would you like me to get this information?" });
+        }
+        
+        if (text === "NEEDS_LOCATION") {
+            return res.json({ response: "I can do that, but I need to know the Google Cloud location/region to check. Where should I look?" });
         }
 
         if (text === "ERROR_MULTIPLE_RESOURCES") {
@@ -101,10 +106,6 @@ app.post("/api/gcloud", async (req, res) => {
 
     const args = command.split(" ");
 
-    // --- THE FINAL FIX ---
-    // The 'command' string from the LLM includes the tool name (e.g., "bq ls").
-    // The 'spawn' function requires that the 'args' array contains only the arguments,
-    // not the command itself. We remove the first element if it matches the tool name.
     if (args.length > 0 && args[0] === tool) {
         args.shift();
     }
@@ -122,7 +123,7 @@ app.post("/api/gcloud", async (req, res) => {
         res.status(500).json({ response: `System Error: Failed to start the command process. Please ensure the execution environment is set up correctly.` })
     });
 
-    // --- STEP 3: Summarize success OR interpret failure (Now Restored) ---
+    // --- STEP 3: Summarize success OR interpret failure ---
     child.on("close", async (code) => {
         if (code !== 0) {
             // --- Handle FAILURE by having the AI interpret the error ---
@@ -132,9 +133,7 @@ app.post("/api/gcloud", async (req, res) => {
                     model: model,
                     systemInstruction: {
                         role: 'system',
-                        parts: [{
-                            text: `You are a helpful Google Cloud assistant. A command has failed. Your goal is to explain the technical error message to a user in a simple, human-readable way. RULES: Do not show the user the raw error message. Analyze the error and explain the likely root cause. Provide a clear, concise, and friendly explanation of the problem and suggest a solution. If the error indicates a missing flag (like --location), be sure to mention it.`
-                        }]
+                        parts: [{ text: `You are a helpful Google Cloud assistant. A command has failed. Your goal is to explain the technical error message to a user in a simple, human-readable way. RULES: Do not show the user the raw error message. Analyze the error and explain the likely root cause. Provide a clear, concise, and friendly explanation of the problem and suggest a solution. If the error indicates a missing flag (like --location), be sure to mention it.` }]
                     }
                 });
                 const result = await errorAnalyzerModel.generateContent(error);
