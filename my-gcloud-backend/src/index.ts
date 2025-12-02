@@ -6,7 +6,7 @@ import { Content, VertexAI } from '@google-cloud/vertexai';
 
 // --- Initialize Vertex AI and Express --- 
 const vertex_ai = new VertexAI({ project: process.env.GCLOUD_PROJECT, location: 'us-central1' });
-const model = 'gemini-2.5-flash'; // CORRECTED MODEL NAME
+const model = 'gemini-2.5-flash';
 
 // --- AGENT BRAIN 1: The Command Generator ---
 const generativeModel = vertex_ai.preview.getGenerativeModel({ 
@@ -84,6 +84,8 @@ app.post("/api/gcloud", async (req, res) => {
         return res.status(500).json({ response: `Error communicating with the AI model: ${error.message}` });
     }
     
+    // --- STEP 2: Execute the generated command with security checks ---
+    
     const toolPaths: { [key: string]: string } = {
         'gcloud': '/usr/bin/gcloud',
         'gsutil': '/usr/bin/gsutil',
@@ -98,6 +100,15 @@ app.post("/api/gcloud", async (req, res) => {
     }
 
     const args = command.split(" ");
+
+    // --- THE FINAL FIX ---
+    // The 'command' string from the LLM includes the tool name (e.g., "bq ls").
+    // The 'spawn' function requires that the 'args' array contains only the arguments,
+    // not the command itself. We remove the first element if it matches the tool name.
+    if (args.length > 0 && args[0] === tool) {
+        args.shift();
+    }
+
     const child = spawn(executablePath, args, {
         env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1", CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken },
     });
@@ -111,15 +122,29 @@ app.post("/api/gcloud", async (req, res) => {
         res.status(500).json({ response: `System Error: Failed to start the command process. Please ensure the execution environment is set up correctly.` })
     });
 
-    // --- STEP 3: Summarize success OR interpret failure ---
+    // --- STEP 3: Summarize success OR interpret failure (Now Restored) ---
     child.on("close", async (code) => {
         if (code !== 0) {
-            // --- TEMPORARY DEBUGGING STEP: Return the raw error to the UI ---
-            console.error(`[${tool}] Command failed with exit code ${code}. Raw stderr:`);
-            console.error(error);
-            return res.status(400).json({ 
-                response: `The command failed with a technical error. Please provide this exact error to the support team:\n\n--- BEGIN RAW ERROR ---\n${error}\n--- END RAW ERROR ---` 
-            });
+            // --- Handle FAILURE by having the AI interpret the error ---
+            console.error(`[${tool}] Command failed with exit code ${code}:`, error);
+            try {
+                const errorAnalyzerModel = vertex_ai.preview.getGenerativeModel({
+                    model: model,
+                    systemInstruction: {
+                        role: 'system',
+                        parts: [{
+                            text: `You are a helpful Google Cloud assistant. A command has failed. Your goal is to explain the technical error message to a user in a simple, human-readable way. RULES: Do not show the user the raw error message. Analyze the error and explain the likely root cause. Provide a clear, concise, and friendly explanation of the problem and suggest a solution. If the error indicates a missing flag (like --location), be sure to mention it.`
+                        }]
+                    }
+                });
+                const result = await errorAnalyzerModel.generateContent(error);
+                const friendlyError = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+                return res.status(400).json({ response: friendlyError || `The command failed, and I was unable to determine the cause.` });
+
+            } catch (analysisError: any) {
+                console.error("[Vertex AI] Error during error analysis:", analysisError);
+                return res.status(500).json({ response: `The command failed, and I was unable to analyze the error. Here is the raw error:\n\n${error}` });
+            }
         }
 
         // --- Handle SUCCESS (this part is now for success cases only) ---
