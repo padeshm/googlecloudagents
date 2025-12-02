@@ -31,10 +31,15 @@ const ChatbotTemplate = () => {
         },
         {
             id: 'gcloud-command-executor',
-            name: 'Google Cloud Command Executor',
-            description: 'I translate natural language into gcloud commands and execute them.', // Added description
+            name: 'Google Cloud Command Agent',
+            description: null, // Removed description from here
             messages: [
-                { id: 1, type: 'bot', content: "Hello! I can execute gcloud commands for you. What would you like to do? (e.g., 'list my compute instances')", timestamp: new Date().toISOString() } // Updated message
+                { 
+                    id: 1, 
+                    type: 'bot', 
+                    content: "Hello! I am your Google Cloud Command Agent. I translate your requests into simple CLI commands.\n\n**What I can do:**\nI can list resources, get object metadata, and check permissions using `gcloud`, `gsutil`, `kubectl`, and `bq`.\n\n**What I cannot do:**\nI cannot execute complex SQL data queries or run multiple commands at the same time.\n\n*Disclaimer: In some complex cases, I may not be able to generate a command, but I will always try my best to help.*\n\nWhat would you like to do?", 
+                    timestamp: new Date().toISOString() 
+                }
             ],
             endpoint: 'https://gcloud-mcp-server-652176787350.us-central1.run.app/api/gcloud'
         }
@@ -138,9 +143,6 @@ const ChatbotTemplate = () => {
         try {
             const isCommandExecutor = activeAgent.id === 'gcloud-command-executor';
 
-            // The request body now sends a "prompt" for both agents.
-            // The `gcloud-command-executor` backend will use the prompt and ignore the history.
-            // The `google-cloud-helper` backend will use both.
             const requestBody = { prompt: messageToSend, history: activeAgent.messages };
 
             const response = await fetch(activeAgent.endpoint, {
@@ -158,9 +160,7 @@ const ChatbotTemplate = () => {
                 throw new Error(data.response || data.error || `HTTP error! status: ${response.status}`);
             }
 
-            // The response HANDLING is still conditional because the two backends return different data structures.
             if (isCommandExecutor) {
-                // Node.js backend returns a single response object: { response: "..." }
                 const botMessage = {
                     id: Date.now() + 1,
                     type: 'bot',
@@ -172,7 +172,6 @@ const ChatbotTemplate = () => {
                 ));
 
             } else {
-                // Python backend returns the entire updated history: { history: [...] }
                 setAgents(prevAgents => prevAgents.map(agent =>
                     agent.id === currentAgentId ? { ...agent, messages: data.history } : agent
                 ));
@@ -359,7 +358,7 @@ const ChatbotTemplate = () => {
                         </div>
 
                         {/* Message Input Area */}
-                        <div className={`p-6 border-t flex-shrink-0 ${isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
+                        <div className={`p-6 border-t flex-shrink-0 ${isDarkMode ? 'border-gray-700 bg-gundar-gray-800' : 'border-gray-200 bg-white'}`}>
                             <div className="flex items-center space-x-3">
                                 <input
                                     type="text"
