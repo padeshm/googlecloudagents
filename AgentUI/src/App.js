@@ -37,7 +37,7 @@ const ChatbotTemplate = () => {
                 { 
                     id: 1, 
                     type: 'bot', 
-                    content: "Hello! I am your Google Cloud Command Agent. I translate your requests into simple CLI commands.\n\n**What I can do:**\nI can list resources, get object metadata, and check permissions using `gcloud`, `gsutil`, `kubectl`, and `bq`.\n\n**What I cannot do:**\nI cannot execute complex SQL data queries or run multiple commands at the same time.\n\n*Disclaimer: In some complex cases, I may not be able to generate a command, but I will always try my best to help.*\n\nWhat would you like to do?", 
+                    content: "Hello! I am your Google Cloud Command Agent. Here's a quick overview:\n• I can list resources, get metadata, and check permissions.\n• I work with `gcloud`, `gsutil`, `kubectl`, and `bq`.\n• I cannot run complex SQL data queries.\n• I do not support multiple commands or scripts.\n\n*Disclaimer: In some cases, I may not be able to generate a command, but I'll always try my best to help.*\n\nWhat can I do for you today?",
                     timestamp: new Date().toISOString() 
                 }
             ],
@@ -358,7 +358,7 @@ const ChatbotTemplate = () => {
                         </div>
 
                         {/* Message Input Area */}
-                        <div className={`p-6 border-t flex-shrink-0 ${isDarkMode ? 'border-gray-700 bg-gundar-gray-800' : 'border-gray-200 bg-white'}`}>
+                        <div className={`p-6 border-t flex-shrink-0 ${isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'}`}>
                             <div className="flex items-center space-x-3">
                                 <input
                                     type="text"
