@@ -17,17 +17,20 @@ RUN apt-get update && apt-get install -y \
     rm -rf /var/lib/apt/lists/*
 
 # 2. Manually Install the Google Cloud SDK for full control
-# This ensures the component manager is available
 ENV GCLOUD_SDK_VERSION=468.0.0
 ENV GCLOUD_SDK_URL="https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-${GCLOUD_SDK_VERSION}-linux-x86_64.tar.gz"
 
-# Download, extract, and install
+# Download, extract, install, and create symbolic links
 RUN curl -O ${GCLOUD_SDK_URL} && \
     tar -xf google-cloud-cli-${GCLOUD_SDK_VERSION}-linux-x86_64.tar.gz && \
     rm google-cloud-cli-${GCLOUD_SDK_VERSION}-linux-x86_64.tar.gz && \
-    ./google-cloud-sdk/install.sh --quiet --usage-reporting=false --path-update=true
+    ./google-cloud-sdk/install.sh --quiet --usage-reporting=false --path-update=true && \
+    # Create symbolic links to make tools available system-wide
+    ln -s /google-cloud-sdk/bin/gcloud /usr/bin/gcloud && \
+    ln -s /google-cloud-sdk/bin/bq /usr/bin/bq && \
+    ln -s /google-cloud-sdk/bin/gsutil /usr/bin/gsutil
 
-# Add gcloud and its component bins to the PATH for all future sessions
+# Add gcloud to the PATH for all future sessions (good practice)
 ENV PATH /google-cloud-sdk/bin:$PATH
 
 # 3. Application Setup

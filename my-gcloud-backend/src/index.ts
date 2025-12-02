@@ -6,7 +6,7 @@ import { Content, VertexAI } from '@google-cloud/vertexai';
 
 // --- Initialize Vertex AI and Express --- 
 const vertex_ai = new VertexAI({ project: process.env.GCLOUD_PROJECT, location: 'us-central1' });
-const model = 'gemini-2.5-flash'; // CONFIRMED CORRECT MODEL NAME
+const model = 'gemini-2.5-flash'; // CORRECTED MODEL NAME
 
 // --- AGENT BRAIN 1: The Command Generator ---
 const generativeModel = vertex_ai.preview.getGenerativeModel({ 
@@ -14,8 +14,7 @@ const generativeModel = vertex_ai.preview.getGenerativeModel({
     systemInstruction: {
         role: 'system',
         parts: [{
-            text: `You are an expert in Google Cloud command-line tools. Your goal is to translate a user's request into a single, executable command for one of the following tools: gcloud, gsutil, kubectl, bq.\n\nCRITICAL RULES:\n1.  **One Command Only:** If the user asks for an action on multiple resources (e.g., "get the row count for each table"), you MUST respond with the single keyword: \`ERROR_MULTIPLE_RESOURCES\`.\n2.  **Error Correction Workflow:** If the previous turn was a model response explaining a command failure (e.g., a missing required flag like --location), and the user's new prompt provides the missing information, your job is to RECONSTRUCT the original failed command with the new information. For example, if the user first said "list datascans" and the model responded "you need a location," and the user's new prompt is "us-central1", you must generate the command \`gcloud dataplex datascans list --location=us-central1\`.\n3.  **No Shell Operations:** The execution environment does NOT support shell features like pipes (\`|\`), redirection (\`>\`), or command chaining (\`&&\`). Do NOT include these in your command.\n4.  **Pathing Rule:** For \`gsutil\`, all paths MUST start with \`gs://\`. Never generate \`file://\` paths.\n5.  **Strategy for Complex Questions:** When a user asks a question that requires calculation, counting, or querying (e.g., "how many rows are in this table?"), your primary job is NOT to answer directly. Instead, you must generate a command that retrieves the detailed metadata or a detailed list of the resource(s). The subsequent summarization step will perform the actual calculation.\n6.  **Kubernetes Two-Step Workflow:**\n    a.  Interacting with a Kubernetes cluster requires credentials. If the user asks to perform a \`kubectl\` action and the conversation history does NOT show that credentials have already been successfully obtained for that specific cluster, your ONLY job is to generate the \`gcloud container clusters get-credentials\` command.\n    b.  ONLY if the history already shows a successful \`get-credentials\` command for the target cluster should you then generate the requested \`kubectl\` command.\n7.  **Output JSON:** Your final output MUST be a single, valid JSON object with two keys: \`tool\` and \`command\`.\n8.  **Handle Missing Project:** If a command requires a project ID and one has not been provided, return the single keyword: \`NEEDS_PROJECT\`.
-9.  **Handle Ambiguity:** If the request is ambiguous or impossible under these rules, return the single keyword: \`ERROR\`.`
+            text: `You are an expert in Google Cloud command-line tools. Your goal is to translate a user's request into a single, executable command for one of the following tools: gcloud, gsutil, kubectl, bq.\n\nCRITICAL RULES:\n1.  **One Command Only:** If the user asks for an action on multiple resources (e.g., "get the row count for each table"), you MUST respond with the single keyword: \`ERROR_MULTIPLE_RESOURCES\`.\n2.  **Error Correction Workflow:** If the previous turn was a model response explaining a command failure (e.g., a missing required flag like --location), and the user's new prompt provides the missing information, your job is to RECONSTRUCT the original failed command with the new information. For example, if the user first said "list datascans" and the model responded "you need a location," and the user's new prompt is "us-central1", you must generate the command \`gcloud dataplex datascans list --location=us-central1\`.\n3.  **No Shell Operations:** The execution environment does NOT support shell features like pipes (\`|\`), redirection (\`>\`), or command chaining (\`&&\`). Do NOT include these in your command.\n4.  **Pathing Rule:** For \`gsutil\`, all paths MUST start with \`gs://\`. Never generate \`file://\` paths.\n5.  **Strategy for Complex Questions:** When a user asks a question that requires calculation, counting, or querying (e.g., "how many rows are in this table?"), your primary job is NOT to answer directly. Instead, you must generate a command that retrieves the detailed metadata or a detailed list of the resource(s). The subsequent summarization step will perform the actual calculation.\n6.  **Kubernetes Two-Step Workflow:**\n    a.  Interacting with a Kubernetes cluster requires credentials. If the user asks to perform a \`kubectl\` action and the conversation history does NOT show that credentials have already been successfully obtained for that specific cluster, your ONLY job is to generate the \`gcloud container clusters get-credentials\` command.\n    b.  ONLY if the history already shows a successful \`get-credentials\` command for the target cluster should you then generate the requested \`kubectl\` command.\n7.  **Output JSON:** Your final output MUST be a single, valid JSON object with two keys: \`tool\` and \`command\`.\n8.  **Handle Missing Project:** If a command requires a project ID and one has not been provided, return the single keyword: \`NEEDS_PROJECT\`.\n9.  **Handle Ambiguity:** If the request is ambiguous or impossible under these rules, return the single keyword: \`ERROR\`.`
         }]
     }
 });
@@ -87,13 +86,24 @@ app.post("/api/gcloud", async (req, res) => {
     }
     
     // --- STEP 2: Execute the generated command with security checks ---
-    const ALLOWED_TOOLS = ['gcloud', 'gsutil', 'kubectl', 'bq'];
-    if (!ALLOWED_TOOLS.includes(tool)) {
+    
+    // **THE INTENDED FIX:** Map tool names to their absolute paths guaranteed by the Dockerfile.
+    const toolPaths: { [key: string]: string } = {
+        'gcloud': '/usr/bin/gcloud',
+        'gsutil': '/usr/bin/gsutil',
+        'kubectl': '/usr/bin/kubectl',
+        'bq': '/usr/bin/bq'
+    };
+
+    const executablePath = toolPaths[tool];
+
+    if (!executablePath) {
         return res.status(403).json({ response: `The command '${tool}' is not in the list of allowed tools.` });
     }
 
     const args = command.split(" ");
-    const child = spawn(tool, args, {
+    // Use the absolute path in the spawn call.
+    const child = spawn(executablePath, args, {
         env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1", CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken },
     });
 
@@ -101,7 +111,11 @@ app.post("/api/gcloud", async (req, res) => {
     let error = "";
     child.stdout.on("data", (data) => (output += data.toString()));
     child.stderr.on("data", (data) => (error += data.toString()));
-    child.on("error", (err) => res.status(500).json({ response: `System Error: Failed to start the command process. Error: ${err.message}` }));
+    child.on("error", (err) => {
+        // This error is now more specific, e.g., "spawn /usr/bin/bq ENOENT" (Error NO ENTity)
+        console.error(`[SPAWN] System Error: Failed to start command '${executablePath}'. Error: ${err.message}`);
+        res.status(500).json({ response: `System Error: Failed to start the command process. Please ensure the execution environment is set up correctly.` })
+    });
 
     // --- STEP 3: Summarize success OR interpret failure ---
     child.on("close", async (code) => {
@@ -124,7 +138,7 @@ app.post("/api/gcloud", async (req, res) => {
 
             } catch (analysisError: any) {
                 console.error("[Vertex AI] Error during error analysis:", analysisError);
-                return res.status(500).json({ response: `The command failed, and I was unable to analyze the error. Here is the raw error:\\n\\n${error}` });
+                return res.status(500).json({ response: `The command failed, and I was unable to analyze the error. Here is the raw error:\n\n${error}` });
             }
         }
 
@@ -144,13 +158,13 @@ app.post("/api/gcloud", async (req, res) => {
             })).filter((msg: any) => msg.parts[0].text && msg.role);
 
             const chat = summarizerModel.startChat({ history: [...transformedHistory, { role: 'user', parts: [{ text: userPrompt }] }] });
-            const result = await chat.sendMessage(`Here is the command output:\\n\\n${output}`);
+            const result = await chat.sendMessage(`Here is the command output:\n\n${output}`);
             const summary = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
             res.json({ response: summary || output });
 
         } catch (summarizationError: any) {
             console.error("[Vertex AI] Error during summarization:", summarizationError);
-            res.status(500).json({ response: `I was able to run the command, but I encountered an error while trying to summarize the results. Here is the raw output:\\n\\n> Executed: ${tool} ${command}\\n\\n${output}` });
+            res.status(500).json({ response: `I was able to run the command, but I encountered an error while trying to summarize the results. Here is the raw output:\n\n> Executed: ${tool} ${command}\n\n${output}` });
         }
     });
 });
