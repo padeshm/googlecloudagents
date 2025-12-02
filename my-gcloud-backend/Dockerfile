@@ -13,6 +13,9 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
     curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - && \
     apt-get update && apt-get install -y google-cloud-cli
 
+# 2a. Install kubectl component for GKE commands
+RUN gcloud components install kubectl
+
 # 3. Application Setup
 WORKDIR /app
 

@@ -6,7 +6,7 @@ import { Content, VertexAI } from '@google-cloud/vertexai';
 
 // --- Initialize Vertex AI and Express --- 
 const vertex_ai = new VertexAI({ project: process.env.GCLOUD_PROJECT, location: 'us-central1' });
-const model = 'gemini-2.5-flash';
+const model = 'gemini-1.5-flash';
 
 // --- AGENT BRAIN 1: The Command Generator ---
 const generativeModel = vertex_ai.preview.getGenerativeModel({ 
@@ -14,14 +14,21 @@ const generativeModel = vertex_ai.preview.getGenerativeModel({
     systemInstruction: {
         role: 'system',
         parts: [{
-            text: `You are a Google Cloud Platform expert, and your one and only goal is to generate a complete, executable gcloud command based on a user's request.
+            text: `You are an expert in Google Cloud command-line tools. Your goal is to translate a user's request into an executable command for one of the following tools: gcloud, gsutil, kubectl, bq.\n\nRULES:\n1.  **Choose the Best Tool:** Based on the user's request and the conversation history, determine the most appropriate command-line tool to use from the allowed list: \`gcloud\`, \`gsutil\`, \`kubectl\`, \`bq\`.
+2.  **Output JSON:** Your final output MUST be a single, valid JSON object with two keys:
+    -   \`tool\`: A string containing the name of the chosen tool (e.g., "gcloud", "kubectl").
+    -   \`command\`: A string containing the rest of the command to be executed, without the tool name prefix.
+3.  **Use History:** You MUST take into account the user's conversation history to understand the full context. The user's latest message is often the final piece of information needed to complete a command.
+4.  **Handle Missing Project:** If a command requires a project ID and one has not been provided in the history or the latest prompt, you MUST return the single keyword: \`NEEDS_PROJECT\`. Do not output JSON in this case.
+5.  **Handle Errors:** If the request, even with the full history, is ambiguous, impossible, or cannot be translated into a valid command for any of the allowed tools, you MUST return the single keyword: \`ERROR\`. Do not output JSON in this case.
 
-RULES:
-- YOU MUST take into account the user's conversation history to understand the full context of their request.
-- The user's latest message is often the final piece of information needed to complete a command from a previous turn. You MUST combine information from the history and the latest message to form a single, complete command.
-- If a project ID is required to run the command and has not been provided in the history or the latest prompt, you MUST return the single keyword: NEEDS_PROJECT
-- If the request, even with the full history, is ambiguous, impossible, or cannot be translated into a gcloud command, you MUST return the single keyword: ERROR
-- Your final output MUST be only the gcloud command itself, without the 'gcloud' prefix.`
+Example:
+User Request: "list my cloud storage buckets for project my-gcp-project"
+Your Output:
+{
+  "tool": "gsutil",
+  "command": "ls -p my-gcp-project"
+}`
         }]
     }
 });
@@ -46,7 +53,8 @@ app.post("/api/gcloud", async (req, res) => {
     }
 
     // --- STEP 1: Translate prompt to command, using conversation history for context ---
-    let gcloudCommand;
+    let tool: string;
+    let command: string;
     try {
         // --- FIX: Transform client-side history to the Vertex AI SDK format ---
         const transformedHistory = history.map((msg: any) => ({
@@ -70,17 +78,25 @@ app.post("/api/gcloud", async (req, res) => {
             return res.status(400).json({ response: `I'm sorry, but I couldn't translate that request into a specific gcloud command. Please try rephrasing your request.` });
         }
 
-        gcloudCommand = text;
-        console.log(`[Vertex AI] Generated command: 'gcloud ${gcloudCommand}'`);
+        // --- NEW: Parse the JSON response from the AI ---
+        const aiResponse = JSON.parse(text);
+        tool = aiResponse.tool;
+        command = aiResponse.command;
+        console.log(`[Vertex AI] Chosen tool: '${tool}', Generated command: '${command}'`);
 
     } catch (error: any) {
         console.error("[Vertex AI] Error during command generation:", error);
         return res.status(500).json({ response: `Error communicating with the AI model: ${error.message}` });
     }
+    
+    // --- STEP 2: Execute the generated command with security checks ---
+    const ALLOWED_TOOLS = ['gcloud', 'gsutil', 'kubectl', 'bq'];
+    if (!ALLOWED_TOOLS.includes(tool)) {
+        return res.status(403).json({ response: `The command '${tool}' is not in the list of allowed tools.` });
+    }
 
-    // --- STEP 2: Execute the generated gcloud command (unchanged) ---
-    const args = gcloudCommand.split(" ");
-    const child = spawn("gcloud", args, {
+    const args = command.split(" ");
+    const child = spawn(tool, args, {
         env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1", CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken },
     });
 
@@ -94,14 +110,14 @@ app.post("/api/gcloud", async (req, res) => {
     child.on("close", async (code) => {
         if (code !== 0) {
             // --- Handle FAILURE by having the AI interpret the error ---
-            console.error(`[gcloud] Command failed with exit code ${code}:`, error);
+            console.error(`[${tool}] Command failed with exit code ${code}:`, error);
             try {
                 const errorAnalyzerModel = vertex_ai.preview.getGenerativeModel({
                     model: model,
                     systemInstruction: {
                         role: 'system',
                         parts: [{
-                            text: `You are a helpful Google Cloud assistant. A gcloud command has failed. Your goal is to explain the technical error message to a user in a simple, human-readable way.
+                            text: `You are a helpful Google Cloud assistant. A command has failed. Your goal is to explain the technical error message to a user in a simple, human-readable way.
 
 RULES:
 - DO NOT show the user the raw error message.
@@ -118,7 +134,7 @@ RULES:
 
             } catch (analysisError: any) {
                 console.error("[Vertex AI] Error during error analysis:", analysisError);
-                return res.status(500).json({ response: `The command failed, and I was unable to analyze the error. Here is the raw error:\n\n${error}` });
+                return res.status(500).json({ response: `The command failed, and I was unable to analyze the error. Here is the raw error:\\n\\n${error}` });
             }
         }
 
@@ -128,7 +144,7 @@ RULES:
                 model: model,
                 systemInstruction: {
                     role: 'system',
-                    parts: [{ text: `You are a helpful Google Cloud assistant. Your goal is to summarize the output of a gcloud command in a clear, conversational way. Do not mention the command that was run.` }]
+                    parts: [{ text: `You are a helpful Google Cloud assistant. Your goal is to summarize the output of a command in a clear, conversational way. Do not mention the command that was run.` }]
                 }
             });
 
@@ -139,13 +155,13 @@ RULES:
             })).filter((msg: any) => msg.parts[0].text && msg.role);
 
             const chat = summarizerModel.startChat({ history: [...transformedHistory, { role: 'user', parts: [{ text: userPrompt }] }] });
-            const result = await chat.sendMessage(`Here is the command output:\n\n${output}`);
+            const result = await chat.sendMessage(`Here is the command output:\\n\\n${output}`);
             const summary = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
             res.json({ response: summary || output });
 
         } catch (summarizationError: any) {
             console.error("[Vertex AI] Error during summarization:", summarizationError);
-            res.status(500).json({ response: `I was able to run the command, but I encountered an error while trying to summarize the results. Here is the raw output:\n\n> Executed: gcloud ${gcloudCommand}\n\n${output}` });
+            res.status(500).json({ response: `I was able to run the command, but I encountered an error while trying to summarize the results. Here is the raw output:\\n\\n> Executed: ${tool} ${command}\\n\\n${output}` });
         }
     });
 });
