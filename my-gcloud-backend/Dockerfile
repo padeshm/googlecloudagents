@@ -8,13 +8,10 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Install Google Cloud CLI
+# 2. Install Google Cloud CLI and kubectl
 RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
     curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - && \
-    apt-get update && apt-get install -y google-cloud-cli
-
-# 2a. Install kubectl component for GKE commands
-RUN gcloud components install kubectl
+    apt-get update && apt-get install -y google-cloud-cli kubectl
 
 # 3. Application Setup
 WORKDIR /app
