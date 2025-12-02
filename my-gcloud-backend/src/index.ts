@@ -6,7 +6,7 @@ import { Content, VertexAI } from '@google-cloud/vertexai';
 
 // --- Initialize Vertex AI and Express --- 
 const vertex_ai = new VertexAI({ project: process.env.GCLOUD_PROJECT, location: 'us-central1' });
-const model = 'gemini-2.5-flash';
+const model = 'gemini-2.5-flash'; // CONFIRMED CORRECT MODEL NAME
 
 // --- AGENT BRAIN 1: The Command Generator ---
 const generativeModel = vertex_ai.preview.getGenerativeModel({ 
@@ -14,21 +14,8 @@ const generativeModel = vertex_ai.preview.getGenerativeModel({
     systemInstruction: {
         role: 'system',
         parts: [{
-            text: `You are an expert in Google Cloud command-line tools. Your goal is to translate a user's request into an executable command for one of the following tools: gcloud, gsutil, kubectl, bq.\n\nRULES:\n1.  **Choose the Best Tool:** Based on the user's request and the conversation history, determine the most appropriate command-line tool to use from the allowed list: \`gcloud\`, \`gsutil\`, \`kubectl\`, \`bq\`.
-2.  **Output JSON:** Your final output MUST be a single, valid JSON object with two keys:
-    -   \`tool\`: A string containing the name of the chosen tool (e.g., "gcloud", "kubectl").
-    -   \`command\`: A string containing the rest of the command to be executed, without the tool name prefix.
-3.  **Use History:** You MUST take into account the user's conversation history to understand the full context. The user's latest message is often the final piece of information needed to complete a command.
-4.  **Handle Missing Project:** If a command requires a project ID and one has not been provided in the history or the latest prompt, you MUST return the single keyword: \`NEEDS_PROJECT\`. Do not output JSON in this case.
-5.  **Handle Errors:** If the request, even with the full history, is ambiguous, impossible, or cannot be translated into a valid command for any of the allowed tools, you MUST return the single keyword: \`ERROR\`. Do not output JSON in this case.
-
-Example:
-User Request: "list my cloud storage buckets for project my-gcp-project"
-Your Output:
-{
-  "tool": "gsutil",
-  "command": "ls -p my-gcp-project"
-}`
+            text: `You are an expert in Google Cloud command-line tools. Your goal is to translate a user's request into a single, executable command for one of the following tools: gcloud, gsutil, kubectl, bq.\n\nCRITICAL RULES:\n1.  **One Command Only:** You must only generate a single command for a single resource. If the user asks for an action on multiple resources (e.g., "get the row count for all tables"), you MUST respond with the keyword \`ERROR\` and explain that you can only operate on one at a time.\n2.  **No Shell Operations:** The execution environment does NOT support shell features like pipes (\`|\`), redirection (\`>\`), or command chaining (\`&&\`). Do NOT include these in your command.\n3.  **Pathing Rule:** For \`gsutil\`, all paths MUST start with \`gs://\`. Never generate \`file://\` paths.\n4.  **Strategy for Complex Questions:** When a user asks a question that requires calculation, counting, or querying (e.g., "how many rows are in this table?", "what are the 3 largest files?"), your primary job is NOT to answer directly. Instead, you must generate a command that retrieves the detailed metadata or a detailed list of the resource(s). The subsequent summarization step will perform the actual calculation.\n    -   **Example (gsutil 'largest files'):** User asks for the 3 largest files in a bucket. You generate the command \`gsutil ls -l gs://[BUCKET_NAME]/\`.\n    -   **Example (bq 'row count'):** User asks for the row count of a table. You generate the command \`bq show --format=json [DATASET].[TABLE]\`. This retrieves the table metadata, which contains the row count.\n5.  **Kubernetes Two-Step Workflow:**\n    a.  Interacting with a Kubernetes cluster requires credentials. If the user asks to perform a \`kubectl\` action (like listing pods, services, etc.) and the conversation history does NOT show that credentials have already been successfully obtained for that specific cluster, your ONLY job is to generate the \`gcloud container clusters get-credentials\` command. You MUST find the cluster name and its location/region from the conversation history to build this command.\n    b.  ONLY if the history already shows a successful \`get-credentials\` command for the target cluster should you then generate the requested \`kubectl\` command.\n6.  **Output JSON:** Your final output MUST be a single, valid JSON object with two keys:\n    -   \`tool\`: A string containing the name of the chosen tool.\n    -   \`command\`: A string containing the rest of the command to be executed.\n7.  **Handle Missing Project:** If a command requires a project ID and one has not been provided, return the single keyword: \`NEEDS_PROJECT\`.
+8.  **Handle Ambiguity:** If the request is ambiguous or impossible under these rules, return the single keyword: \`ERROR\`.`
         }]
     }
 });
@@ -56,7 +43,6 @@ app.post("/api/gcloud", async (req, res) => {
     let tool: string;
     let command: string;
     try {
-        // --- FIX: Transform client-side history to the Vertex AI SDK format ---
         const transformedHistory = history.map((msg: any) => ({
             role: msg.type === 'user' ? 'user' : 'model',
             parts: [{ text: msg.content }]
@@ -78,7 +64,6 @@ app.post("/api/gcloud", async (req, res) => {
             return res.status(400).json({ response: `I'm sorry, but I couldn't translate that request into a specific gcloud command. Please try rephrasing your request.` });
         }
 
-        // --- NEW: Clean the AI response to remove Markdown formatting and parse ---
         const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
         const match = text.match(jsonRegex);
         const cleanedText = match ? match[1] : text;
@@ -90,7 +75,6 @@ app.post("/api/gcloud", async (req, res) => {
 
     } catch (error: any) {
         console.error("[Vertex AI] Error during command generation:", error);
-        // Check for the specific JSON parsing error from the user's report
         if (error instanceof SyntaxError && error.message.includes("is not valid JSON")) {
              return res.status(500).json({ response: `Sorry, I encountered an error: I received an invalid response from the AI model. Please try your request again.` });
         }
@@ -125,14 +109,7 @@ app.post("/api/gcloud", async (req, res) => {
                     systemInstruction: {
                         role: 'system',
                         parts: [{
-                            text: `You are a helpful Google Cloud assistant. A command has failed. Your goal is to explain the technical error message to a user in a simple, human-readable way.
-
-RULES:
-- DO NOT show the user the raw error message.
-- Analyze the error and explain the likely root cause.
-- If the error indicates a project was not found, a typo in the project name, or a permissions issue like SERVICE_DISABLED or PERMISSION_DENIED, tell the user to check that their project ID is correct and that they have the necessary permissions.
-- If the error mentions enabling an API, explain that a specific service needs to be activated for their project.
-- Provide a clear, concise, and friendly explanation of the problem and suggest a solution.`
+                            text: `You are a helpful Google Cloud assistant. A command has failed. Your goal is to explain the technical error message to a user in a simple, human-readable way. RULES: Do not show the user the raw error message. Analyze the error and explain the likely root cause. Provide a clear, concise, and friendly explanation of the problem and suggest a solution.`
                         }]
                     }
                 });
@@ -152,11 +129,10 @@ RULES:
                 model: model,
                 systemInstruction: {
                     role: 'system',
-                    parts: [{ text: `You are a helpful Google Cloud assistant. Your goal is to summarize the output of a command in a clear, conversational way. Do not mention the command that was run.` }]
+                    parts: [{ text: `You are a helpful Google Cloud assistant. Your goal is to summarize the output of a command in a clear, conversational way.\n\nCRITICAL RULES:\n1.  **Directly Answer:** Your summary should directly answer the user's original request, which was: '${userPrompt}'.\n2.  **Handle Metadata:** If the output is a JSON object containing metadata, find the specific field that answers the user's question (e.g., \`numRows\` for a row count) and present it clearly.\n3.  **Handle Kubernetes Credentials:** If the original command was \`gcloud container clusters get-credentials\` and the output includes \`kubeconfig entry generated\`, your summary MUST be: "Okay, I've now configured access to that cluster. Please ask me again to list the pods (or perform your desired action), and I'll be able to do it."` }]
                 }
             });
 
-            // --- FIX: Use the same history transformation for the summarizer ---
             const transformedHistory = history.map((msg: any) => ({
                 role: msg.type === 'user' ? 'user' : 'model',
                 parts: [{ text: msg.content }]
