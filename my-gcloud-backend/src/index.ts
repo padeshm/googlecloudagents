@@ -78,14 +78,22 @@ app.post("/api/gcloud", async (req, res) => {
             return res.status(400).json({ response: `I'm sorry, but I couldn't translate that request into a specific gcloud command. Please try rephrasing your request.` });
         }
 
-        // --- NEW: Parse the JSON response from the AI ---
-        const aiResponse = JSON.parse(text);
+        // --- NEW: Clean the AI response to remove Markdown formatting and parse ---
+        const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
+        const match = text.match(jsonRegex);
+        const cleanedText = match ? match[1] : text;
+
+        const aiResponse = JSON.parse(cleanedText);
         tool = aiResponse.tool;
         command = aiResponse.command;
         console.log(`[Vertex AI] Chosen tool: '${tool}', Generated command: '${command}'`);
 
     } catch (error: any) {
         console.error("[Vertex AI] Error during command generation:", error);
+        // Check for the specific JSON parsing error from the user's report
+        if (error instanceof SyntaxError && error.message.includes("is not valid JSON")) {
+             return res.status(500).json({ response: `Sorry, I encountered an error: I received an invalid response from the AI model. Please try your request again.` });
+        }
         return res.status(500).json({ response: `Error communicating with the AI model: ${error.message}` });
     }
     
@@ -104,7 +112,7 @@ app.post("/api/gcloud", async (req, res) => {
     let error = "";
     child.stdout.on("data", (data) => (output += data.toString()));
     child.stderr.on("data", (data) => (error += data.toString()));
-    child.on("error", (err) => res.status(500).json({ response: `System Error: Failed to start gcloud process. Error: ${err.message}` }));
+    child.on("error", (err) => res.status(500).json({ response: `System Error: Failed to start the command process. Error: ${err.message}` }));
 
     // --- STEP 3: Summarize success OR interpret failure ---
     child.on("close", async (code) => {
