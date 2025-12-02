@@ -44,16 +44,5 @@ COPY src ./src
 # Build TypeScript to JavaScript
 RUN npm run build
 
-# 4. Start the Server with Diagnostics
-# This will run our debug commands first, then start the server.
-CMD echo "--- RUNNING DIAGNOSTICS ---" && \
-    echo "1. Checking symbolic link..." && \
-    ls -l /usr/bin/bq && \
-    echo "2. Checking actual executable..." && \
-    ls -l /google-cloud-sdk/bin/bq && \
-    echo "3. Checking PATH variable..." && \
-    echo $PATH && \
-    echo "4. Testing bq command via absolute path..." && \
-    /usr/bin/bq --version && \
-    echo "--- DIAGNOSTICS COMPLETE, STARTING SERVER ---" && \
-    npm start
+# 4. Start the Server
+CMD ["npm", "start"]
