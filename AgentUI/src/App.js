@@ -42,6 +42,14 @@ const ChatbotTemplate = () => {
                 }
             ],
             endpoint: 'https://gcloud-mcp-server-652176787350.us-central1.run.app/api/gcloud'
+        },
+        {
+            id: 'data-quality-orchestration-agent',
+            name: 'Data Quality Orchestration Agent',
+            messages: [
+                { id: 1, type: 'bot', content: "Hello! I am the Data Quality Orchestration Agent. How can I help you today?", timestamp: new Date().toISOString() }
+            ],
+            endpoint: 'https://my-dataplex-agent-backend-652176787350.us-central1.run.app'
         }
     ]);
 
