@@ -124,7 +124,7 @@ const ChatbotTemplate = () => {
         });
     };
 
-    // --- UPDATED `handleSendMessage` function ---
+    // --- CORRECTED `handleSendMessage` function ---
     const handleSendMessage = async () => {
         if (!activeAgent || currentMessage.trim() === '' || !user || !gcpAccessToken) {
             if (!gcpAccessToken) alert("GCP Access Token is missing. Please sign in again.");
@@ -149,8 +149,6 @@ const ChatbotTemplate = () => {
         setCurrentMessage('');
 
         try {
-            const isCommandExecutor = activeAgent.id === 'gcloud-command-executor';
-
             const requestBody = { prompt: messageToSend, history: activeAgent.messages };
 
             const response = await fetch(activeAgent.endpoint, {
@@ -168,7 +166,11 @@ const ChatbotTemplate = () => {
                 throw new Error(data.response || data.error || `HTTP error! status: ${response.status}`);
             }
 
-            if (isCommandExecutor) {
+            // --- THIS IS THE FIX ---
+            // Unified response handling for ALL agents.
+            // If the response has a 'response' key, treat it as a direct reply.
+            // Otherwise, fall back to the old 'history' key.
+            if (data.response) {
                 const botMessage = {
                     id: Date.now() + 1,
                     type: 'bot',
@@ -179,11 +181,14 @@ const ChatbotTemplate = () => {
                     agent.id === currentAgentId ? { ...agent, messages: [...currentHistoryWithUserMessage, botMessage] } : agent
                 ));
 
-            } else {
+            } else if (data.history) { // Fallback for old agents
                 setAgents(prevAgents => prevAgents.map(agent =>
                     agent.id === currentAgentId ? { ...agent, messages: data.history } : agent
                 ));
+            } else {
+                 throw new Error("The agent returned an unknown response format.");
             }
+            // --- END OF FIX ---
 
         } catch (error) {
             console.error("--- Error in handleSendMessage ---", error);
