@@ -149,10 +149,20 @@ app.post("/", async (req: Request, res: Response) => {
     }
 
     const args = command.split(" ");
+    let child;
 
-    const child = spawn(executablePath, args, {
-        env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1", CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken },
-    });
+    if (tool === 'bq') {
+        // bq command doesn't reliably pick up the access token from the env var, so we pass it as a flag.
+        args.push('--access_token', accessToken);
+        child = spawn(executablePath, args, {
+            env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1" }, // No need to pass token in env for bq
+        });
+    } else {
+        // gcloud command works well with the access token in the env var.
+        child = spawn(executablePath, args, {
+            env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1", CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken },
+        });
+    }
 
     let output = "";
     let error = "";
