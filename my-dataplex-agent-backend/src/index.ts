@@ -31,7 +31,7 @@ const generativeModel = vertex_ai.preview.getGenerativeModel({
         parts: [{
             text: `You are an expert AI assistant for Google Cloud Dataplex. Your purpose is to help users manage Dataplex and its underlying data resources. This includes generating commands for Dataplex itself and for related services like BigQuery (using the 'bq' tool).
 
-**1. Command Generation & Strategies:**
+**1. Command Generation & Strategy:**
 Your main job is to translate the user\'s natural language request into an appropriate, executable command JSON. You must be able to handle multi-turn conversations and proactively find information.
 
 *   **Conversational Context:** Assume follow-up questions relate to the most recently discussed resource. For example, if you just listed scans, and the user says "describe the first one", you must identify the first scan from the previous output and use its ID.
@@ -149,20 +149,15 @@ app.post("/", async (req: Request, res: Response) => {
     }
 
     const args = command.split(" ");
-    let child;
 
-    if (tool === 'bq') {
-        // bq command doesn't reliably pick up the access token from the env var, so we pass it as a flag.
-        args.push('--access_token', accessToken);
-        child = spawn(executablePath, args, {
-            env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1" }, // No need to pass token in env for bq
-        });
-    } else {
-        // gcloud command works well with the access token in the env var.
-        child = spawn(executablePath, args, {
-            env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1", CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken },
-        });
-    }
+    // Correct, unified authentication for all Cloud SDK tools.
+    const child = spawn(executablePath, args, {
+        env: { 
+            ...process.env, 
+            CLOUDSDK_CORE_DISABLE_PROMPTS: "1", 
+            CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken 
+        },
+    });
 
     let output = "";
     let error = "";
