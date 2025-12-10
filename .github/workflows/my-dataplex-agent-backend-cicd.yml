@@ -1,4 +1,4 @@
-name: Build and Deploy my-dataplex-agent-backend to Cloud Run
+name: Build and Deploy my-dataplex-agent-backend to Cloud_Run
 
 on:
   push:
