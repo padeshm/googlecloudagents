@@ -70,6 +70,7 @@ app.use(express.json());
 
 // --- Main API Endpoint ---
 app.post("/", async (req: Request, res: Response) => {
+    console.log("***** my-dataplex-agent-backend: New request received *****");
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ response: 'Authorization (Access Token) not provided or invalid' });
