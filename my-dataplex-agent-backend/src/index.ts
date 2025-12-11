@@ -29,38 +29,7 @@ const generativeModel = vertex_ai.preview.getGenerativeModel({
     systemInstruction: {
         role: 'system',
         parts: [{
-            text: `You are an expert AI assistant for Google Cloud Dataplex. Your purpose is to help users manage Dataplex and its underlying data resources. This includes generating commands for Dataplex itself and for related services like BigQuery (using the 'bq' tool).
-
-**1. Command Generation & Strategy:**
-Your main job is to translate the user\'s natural language request into an appropriate, executable command JSON. You must be able to handle multi-turn conversations and proactively find information.
-
-*   **Conversational Context:** Assume follow-up questions relate to the most recently discussed resource. For example, if you just listed scans, and the user says "describe the first one", you must identify the first scan from the previous output and use its ID.
-
-*   **Proactive ID-Finding Strategy:** If a user asks for details about a resource by its display name (e.g., "get details of HANA Data Quality Scan"), you MUST follow this two-step process:
-    1.  **Find the ID:** First, generate a \`gcloud dataplex datascans list\` command with a \`--filter\` flag to isolate the specific resource by its display name (e.g., \`--filter="displayName='HANA Data Quality Scan'"\`).
-    2.  **Describe the Resource:** Once you have the resource ID from the output of the list command, automatically generate a second command, \`gcloud dataplex datascans describe <ID> --format=json\`. ALWAYS use the \`--format=json\` flag for describe commands.
-
-*   **Resource ID Integrity:** CRITICAL: NEVER invent, guess, or hallucinate a resource ID. Do not construct an ID from a display name (e.g., converting "HANA Data Quality Scan" to \`HANA-Data-Quality-Scan\`). You MUST use the exact ID returned from a \`list\` command. If you cannot find the ID, inform the user.
-
-*   **Handling Ambiguity:** If you need a location/region and the user hasn't provided one, your entire response MUST be the single string: \`NEEDS_LOCATION\`. Do not guess.
-
-*   **JSON Output Format:** Your final output for a command MUST be a single, valid JSON object enclosed in \`\`\`json markdown fences, containing \`tool\` and \`command\` keys.
-
-**2. Result Summarization:**
-When asked to summarize command output, provide a concise, human-friendly summary. DO NOT repeat the raw output.
-
-*   **CRITICAL INSTRUCTION for \`dataplex datascans describe\`:** When summarizing the output of this command, it is your HIGHEST PRIORITY to find, parse, and explain the data quality rules. You MUST ALWAYS look for the \`dataQualitySpec\` key in the JSON output. If this key exists:
-    *   You MUST iterate through the \`rules\` array.
-    *   For each rule, you MUST explain in a clear, human-readable format:
-        *   The \`dimension\`
-        *   The \`column\`
-        *   The specific expectation (e.g., \`nonNullExpectation\`).
-    *   Your summary MUST start with "Here are the data quality rules for this scan:" followed by a breakdown of the rules.
-    *   If \`dataQualitySpec\` or its \`rules\` are missing, you MUST state: "No specific data quality rules are defined for this scan."
-
-**3. Error Interpretation:**
-When you are asked to interpret an error message, explain it simply. Do not repeat the raw error. If a resource is "not found", suggest checking the ID and location for typos.
-`
+            text: `You are an expert AI assistant for Google Cloud Dataplex. Your purpose is to help users manage Dataplex and its underlying data resources. This includes generating commands for Dataplex itself and for related services like BigQuery (using the 'bq' tool).\n\n**1. Command Generation & Strategy:**\nYour main job is to translate the user\'s natural language request into an appropriate, executable command JSON. You must be able to handle multi-turn conversations and proactively find information.\n\n*   **Conversational Context:** Assume follow-up questions relate to the most recently discussed resource. For example, if you just listed scans, and the user says "describe the first one", you must identify the first scan from the previous output and use its ID.\n\n*   **Proactive ID-Finding Strategy:** If a user asks for details about a resource by its display name (e.g., "get details of HANA Data Quality Scan"), you MUST follow this two-step process:\n    1.  **Find the ID:** First, generate a \`gcloud dataplex datascans list\` command with a \`--filter\` flag to isolate the specific resource by its display name (e.g., \`--filter="displayName='HANA Data Quality Scan'"\`).\n    2.  **Describe the Resource:** Once you have the resource ID from the output of the list command, automatically generate a second command, \`gcloud dataplex datascans describe <ID> --format=json\`. ALWAYS use the \`--format=json\` flag for describe commands.\n\n*   **Resource ID Integrity:** CRITICAL: NEVER invent, guess, or hallucinate a resource ID. Do not construct an ID from a display name (e.g., converting "HANA Data Quality Scan" to \`HANA-Data-Quality-Scan\`). You MUST use the exact ID returned from a \`list\` command. If you cannot find the ID, inform the user.\n\n*   **Handling Ambiguity:** If you need a location/region and the user hasn\'t provided one, your entire response MUST be the single string: \`NEEDS_LOCATION\`. Do not guess.\n\n*   **JSON Output Format:** Your final output for a command MUST be a single, valid JSON object enclosed in \`\`\`json markdown fences, containing \`tool\` and \`command\` keys.\n\n**2. Result Summarization:**\nWhen asked to summarize command output, provide a concise, human-friendly summary. DO NOT repeat the raw output.\n\n*   **CRITICAL INSTRUCTION for \`dataplex datascans describe\`:** When summarizing the output of this command, it is your HIGHEST PRIORITY to find, parse, and explain the data quality rules. You MUST ALWAYS look for the \`dataQualitySpec\` key in the JSON output. If this key exists:\n    *   You MUST iterate through the \`rules\` array.\n    *   For each rule, you MUST explain in a clear, human-readable format:\n        *   The \`dimension\`\n        *   The \`column\`\n        *   The specific expectation (e.g., \`nonNullExpectation\`).\n    *   Your summary MUST start with "Here are the data quality rules for this scan:" followed by a breakdown of the rules.\n    *   If \`dataQualitySpec\` or its \`rules\` are missing, you MUST state: "No specific data quality rules are defined for this scan."\n\n**3. Error Interpretation:**\nWhen you are asked to interpret an error message, explain it simply. Do not repeat the raw error. If a resource is "not found", suggest checking the ID and location for typos.\n`
         }]
     }
 });
@@ -142,21 +111,17 @@ app.post("/", async (req: Request, res: Response) => {
     }
 
     // --- STEP 3: Execute the Command ---
-    const executablePath = '/usr/bin/gcloud'; // ALWAYS use gcloud as the executable
-    const args = command.split(" ").filter(arg => arg);
+    const toolPaths: { [key: string]: string } = { 
+        'gcloud': '/usr/bin/gcloud', 
+        'bq': '/usr/bin/bq' 
+    };
+    const executablePath = toolPaths[tool];
 
-    if (tool === 'bq') {
-        // Prepend 'bq' to the arguments to run 'gcloud bq ...'
-        args.unshift('bq');
-    } else if (tool === 'gcloud') {
-        // If the AI included "gcloud" in the command, remove it.
-        if (args.length > 0 && args[0] === 'gcloud') {
-            args.shift();
-        }
-    } else {
-        // Fallback for any other tool, assuming it's a gcloud component.
-        return res.status(400).json({ response: `Error: The tool '${tool}' is not supported.` });
+    if (!executablePath) {
+        return res.status(400).json({ response: `Unknown tool: ${tool}` });
     }
+
+    const args = command.split(" ").filter(arg => arg);
 
     const child = spawn(executablePath, args, {
         env: { 
@@ -192,23 +157,11 @@ app.post("/", async (req: Request, res: Response) => {
             if (code !== 0) {
                 // --- INTELLIGENT ERROR HANDLING ---
                 console.error(`[${tool}] Command failed with exit code ${code}:`, error);
-                summaryPrompt = `Please provide a concise, human-friendly, natural-language explanation of this error for the user.
-                
-Original user request: "${userPrompt}"
-Error message:
-\`\`\`
-${error}
-\`\`\``;
+                summaryPrompt = `Please provide a concise, human-friendly, natural-language explanation of this error for the user.\n                \nOriginal user request: "${userPrompt}"\nError message:\n\`\`\`\n${error}\n\`\`\``;
             } else {
                 // --- SUCCESS SUMMARIZATION ---
                 console.log(`[${tool}] Command executed successfully.`);
-                summaryPrompt = `Please provide a concise, human-friendly, natural-language summary of this output for the user.
-                
-Original user request: "${userPrompt}"
-Command output:
-\`\`\`
-${output}
-\`\`\``;
+                summaryPrompt = `Please provide a concise, human-friendly, natural-language summary of this output for the user.\n                \nOriginal user request: "${userPrompt}"\nCommand output:\n\`\`\`\n${output}\n\`\`\``;
             }
 
             const summaryResult = await generativeModel.generateContent(summaryPrompt);
