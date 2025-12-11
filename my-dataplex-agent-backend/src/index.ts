@@ -142,15 +142,21 @@ app.post("/", async (req: Request, res: Response) => {
     }
 
     // --- STEP 3: Execute the Command ---
-    const toolPaths: { [key: string]: string } = { 'gcloud': '/usr/bin/gcloud', 'bq': '/usr/bin/bq' };
-    const executablePath = toolPaths[tool];
-
-    if (!executablePath) {
-        return res.status(400).json({ response: `Unknown tool: ${tool}` });
-    }
-
+    const executablePath = '/usr/bin/gcloud'; // ALWAYS use gcloud as the executable
     const args = command.split(" ").filter(arg => arg);
-    if (args.length > 0 && args[0] === tool) args.shift();
+
+    if (tool === 'bq') {
+        // Prepend 'bq' to the arguments to run 'gcloud bq ...'
+        args.unshift('bq');
+    } else if (tool === 'gcloud') {
+        // If the AI included "gcloud" in the command, remove it.
+        if (args.length > 0 && args[0] === 'gcloud') {
+            args.shift();
+        }
+    } else {
+        // Fallback for any other tool, assuming it's a gcloud component.
+        return res.status(400).json({ response: `Error: The tool '${tool}' is not supported.` });
+    }
 
     const child = spawn(executablePath, args, {
         env: { 
