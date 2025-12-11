@@ -149,6 +149,7 @@ app.post("/", async (req: Request, res: Response) => {
     }
 
     const args = command.split(" ").filter(arg => arg);
+    if (args.length > 0 && args[0] === tool) args.shift();
 
     // Correct, unified authentication for all Cloud SDK tools.
     const child = spawn(executablePath, args, {
