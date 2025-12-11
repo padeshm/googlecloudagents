@@ -148,7 +148,7 @@ app.post("/", async (req: Request, res: Response) => {
         return res.status(400).json({ response: `Unknown tool: ${tool}` });
     }
 
-    const args = command.split(" ");
+    const args = command.split(" ").filter(arg => arg);
 
     // Correct, unified authentication for all Cloud SDK tools.
     const child = spawn(executablePath, args, {
