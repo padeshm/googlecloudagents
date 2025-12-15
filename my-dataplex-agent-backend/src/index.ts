@@ -70,7 +70,9 @@ app.use(express.json());
 
 // --- Main API Endpoint ---
 app.post("/", async (req: Request, res: Response) => {
-    console.log("***** my-dataplex-agent-backend: New request received *****");
+    console.log("--- NEW DATAPLEX-BACKEND REQUEST ---");
+    console.log(`[REQUEST_BODY]: ${JSON.stringify(req.body)}`);
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ response: 'Authorization (Access Token) not provided or invalid' });
@@ -100,6 +102,8 @@ app.post("/", async (req: Request, res: Response) => {
         if (!text) {
             return res.status(500).json({ response: "The AI model returned an empty response." });
         }
+
+        console.log(`[AI_RESPONSE]: ${text}`);
 
         // --- Handle 'NEEDS_LOCATION' token ---
         if (text === "NEEDS_LOCATION") {
@@ -137,7 +141,7 @@ app.post("/", async (req: Request, res: Response) => {
             console.log(`[Dataplex Agent] Created temporary YAML spec at: '${yamlFilePath}'`);
         }
 
-        console.log(`[Dataplex Agent] Tool: '${tool}', Args:`, args);
+        console.log(`[PARSED_COMMAND]: Tool: '${tool}', Args:`, args);
 
     } catch (error: any) {
         console.error("[Vertex AI] Error during command/YAML generation or parsing:", error);
@@ -152,8 +156,8 @@ app.post("/", async (req: Request, res: Response) => {
     if (!executablePath) {
         return res.status(403).json({ response: `The command tool '${tool}' is not in the list of allowed tools.` });
     }
-    // No more unreliable splitting! The 'args' array is used directly.
 
+    console.log(`[EXECUTION_ENV]: ${JSON.stringify(process.env)}`);
     const child = spawn(executablePath, args, {
         env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1", CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken },
     });
@@ -163,11 +167,15 @@ app.post("/", async (req: Request, res: Response) => {
     child.stdout.on("data", (data) => (output += data.toString()));
     child.stderr.on("data", (data) => (error += data.toString()));
     child.on("error", (err) => {
-        console.error(`[SPAWN] System Error: Failed to start command. Error: ${err.message}`);
+        console.error(`[SPAWN_ERROR]: ${err.message}`);
         res.status(500).json({ response: 'System Error: Failed to start the command process.' });
     });
 
     child.on("close", async (code) => {
+        console.log(`[COMMAND_STDOUT]: ${output}`);
+        console.log(`[COMMAND_STDERR]: ${error}`);
+        console.log(`[COMMAND_EXIT_CODE]: ${code}`);
+
         // --- STEP 4: Clean up ---
         if (yamlFilePath) {
             try {
@@ -183,7 +191,6 @@ app.post("/", async (req: Request, res: Response) => {
             let summaryPrompt: string;
             if (code !== 0) {
                 // --- INTELLIGENT ERROR HANDLING ---
-                console.error(`[${tool}] Command failed with exit code ${code}:`, error);
                 summaryPrompt = `Please provide a concise, human-friendly, natural-language explanation of this error for the user.
                 
 Original user request: "${userPrompt}"
@@ -193,7 +200,6 @@ ${error}
 \`\`\``;
             } else {
                 // --- SUCCESS SUMMARIZATION ---
-                console.log(`[${tool}] Command executed successfully.`);
                 summaryPrompt = `Please provide a concise, human-friendly, natural-language summary of this output for the user.
                 
 Original user request: "${userPrompt}"
@@ -206,7 +212,6 @@ ${output}
             const summaryResult = await generativeModel.generateContent(summaryPrompt);
             const summaryText = summaryResult.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
             
-            // For failures, send a 400 status. For successes, send a 200.
             if (code !== 0) {
                 res.status(400).json({ response: summaryText || error });
             } else {
@@ -215,7 +220,6 @@ ${output}
 
         } catch (summaryError: any) {
             console.error("[Vertex AI] Error during summarization:", summaryError);
-            // Fallback to raw output/error on summary failure
             if (code !== 0) {
                 res.status(400).json({ response: error });
             } else {
