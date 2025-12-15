@@ -1,5 +1,5 @@
 
-import express from "express";
+import express, { Request, Response } from "express";
 import cors from "cors";
 import { v4 as uuidv4 } from 'uuid';
 import { ChatVertexAI } from "@langchain/google-vertexai";
@@ -9,7 +9,14 @@ import {
   MessagesPlaceholder,
 } from "@langchain/core/prompts";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
+// Corrected import to the new TypeScript tool
 import { gcloudTool } from "./tools/gcloud-tool.js";
+
+// --- Define the structure of the request body for type safety ---
+interface InvokeRequestBody {
+    prompt: string;
+    conversation_id?: string;
+}
 
 // --- 1. Agent Configuration ---
 const model = new ChatVertexAI({
@@ -17,10 +24,8 @@ const model = new ChatVertexAI({
   temperature: 0,
 });
 
-// The agent will only have access to the gcloud tool.
 const tools = [gcloudTool];
 
-// The system prompt defines the AI's personality, rules, and how it uses its tools.
 const systemPrompt = `You are a highly capable Google Cloud assistant. Your primary goal is to help users by executing gcloud commands, with a specialization in Dataplex.
 
 **CRITICAL RULES:**
@@ -40,7 +45,6 @@ const systemPrompt = `You are a highly capable Google Cloud assistant. Your prim
 `;
 
 // --- 2. Prompt Template ---
-// This structures the conversation for the agent, including history and a place for its internal thoughts.
 const prompt = ChatPromptTemplate.fromMessages([
   ["system", systemPrompt],
   new MessagesPlaceholder("chat_history"),
@@ -49,18 +53,16 @@ const prompt = ChatPromptTemplate.fromMessages([
 ]);
 
 // --- 3. Agent & Executor ---
-// This wires the model, tools, and prompt together.
 const agent = await createToolCallingAgent({
   llm: model,
   tools,
   prompt,
 });
 
-// The AgentExecutor is the runtime that makes the agent work (manages memory, tool calls, etc.).
 const agentExecutor = new AgentExecutor({
   agent,
   tools,
-verbose: true,
+  verbose: true,
 });
 
 // --- 4. In-Memory Storage for Chat Histories ---
@@ -70,15 +72,14 @@ const chatHistories = new Map();
 const app = express();
 const port = process.env.PORT || 8080;
 
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
-// This single endpoint replaces all the old complex logic.
-app.post("/", async (req: Request, res: Response) => {
+// Correctly typed the Express request and response
+app.post("/", async (req: Request<{}, {}, InvokeRequestBody>, res: Response) => {
   try {
-    // Use 'prompt' from request body to match the existing frontend.
-    const { prompt: input } = req.body;
-    let conversation_id = req.body.conversation_id || uuidv4();
+    const { prompt: input, conversation_id: convId } = req.body;
+    let conversation_id = convId || uuidv4();
 
     if (!input) {
       return res.status(400).json({ response: "Request body must include 'prompt'" });
@@ -88,18 +89,16 @@ app.post("/", async (req: Request, res: Response) => {
     
     console.log(`\n---\nInvoking agent for conversation [${conversation_id}] with input: \"${input}\"\n---\n`);
 
-    // The agent executor handles the entire process: thinking, using tools, and generating a response.
     const result = await agentExecutor.invoke({
       input: input,
       chat_history: history,
     });
 
-    // Save the latest turn to memory for the next request.
     history.push(new HumanMessage(input));
     history.push(new AIMessage(result.output as string));
-    chatHistries.set(conversation_id, history);
+    // Corrected the typo from 'chatHistries' to 'chatHistories'
+    chatHistories.set(conversation_id, history);
 
-    // Return the final answer to the user.
     res.json({ response: result.output, conversation_id: conversation_id });
 
   } catch (error: any) {
