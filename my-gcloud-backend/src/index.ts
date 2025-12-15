@@ -35,6 +35,9 @@ app.use(cors());
 app.use(express.json());
 
 app.post("/api/gcloud", async (req, res) => {
+    console.log("--- NEW GCLOUD-BACKEND REQUEST ---");
+    console.log(`[REQUEST_BODY]: ${JSON.stringify(req.body)}`);
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ response: 'Authorization (Access Token) not provided or invalid' });
@@ -46,7 +49,6 @@ app.post("/api/gcloud", async (req, res) => {
         return res.status(400).json({ response: 'Prompt not provided in the request body' });
     }
 
-    // --- STEP 1: Translate prompt to command ---
     let tool: string;
     let command: string;
     try {
@@ -62,8 +64,9 @@ app.post("/api/gcloud", async (req, res) => {
         if (!rawResponseText) {
             return res.status(500).json({ response: "The AI model returned an invalid or empty response." });
         }
+        
+        console.log(`[AI_RESPONSE]: ${rawResponseText}`);
 
-        // Handle potential keywords FIRST, before attempting to parse JSON
         const upperResponse = rawResponseText.toUpperCase();
         if (upperResponse === "NEEDS_PROJECT") {
             return res.json({ response: "I can do that. For which project would you like me to get this information?" });
@@ -74,12 +77,10 @@ app.post("/api/gcloud", async (req, res) => {
         if (upperResponse === "ERROR_MULTIPLE_RESOURCES") {
             return res.status(400).json({ response: `I\'m sorry, I can only perform operations on one resource at a time. Please ask me again for each resource individually.` });
         }
-        // This will catch conversational prompts that the AI flags as an error.
         if (upperResponse === "ERROR") {
             return res.status(400).json({ response: `I\'m sorry, but I couldn\'t translate that request into a valid command. Please try rephrasing your request.` });
         }
 
-        // If it wasn't a keyword, it must be JSON. Attempt to parse it.
         const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
         const match = rawResponseText.match(jsonRegex);
         const cleanedText = match ? match[1] : rawResponseText;
@@ -87,14 +88,13 @@ app.post("/api/gcloud", async (req, res) => {
         const aiResponse = JSON.parse(cleanedText);
         tool = aiResponse.tool;
         command = aiResponse.command;
-        console.log(`[Vertex AI] Parsed Command. Tool: '${tool}', Command: '${command}'`);
+        console.log(`[PARSED_COMMAND]: Tool: '${tool}', Command: '${command}'`);
 
     } catch (error: any) {
         console.error("[Vertex AI] Error during command generation or parsing:", error);
         return res.status(500).json({ response: `Sorry, I received an invalid response from the AI model. Please try your request again.` });
     }
 
-    // --- STEP 2: Execute Command ---
     const toolPaths: { [key: string]: string } = {
         'gcloud': '/usr/bin/gcloud', 'gsutil': '/usr/bin/gsutil', 'kubectl': '/usr/bin/kubectl', 'bq': '/usr/bin/bq'
     };
@@ -105,6 +105,7 @@ app.post("/api/gcloud", async (req, res) => {
     const args = command.split(" ").filter(arg => arg);
     if (args.length > 0 && args[0] === tool) args.shift();
 
+    console.log(`[EXECUTION_ENV]: ${JSON.stringify(process.env)}`);
     const child = spawn(executablePath, args, {
         env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1", CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken },
     });
@@ -114,13 +115,16 @@ app.post("/api/gcloud", async (req, res) => {
     child.stdout.on("data", (data) => (output += data.toString()));
     child.stderr.on("data", (data) => (error += data.toString()));
     child.on("error", (err) => {
-        console.error(`[SPAWN] System Error: Failed to start command '${executablePath}'. Error: ${err.message}`);
+        console.error(`[SPAWN_ERROR]: ${err.message}`);
         res.status(500).json({ response: `System Error: Failed to start the command process.` });
     });
 
     child.on("close", async (code) => {
+        console.log(`[COMMAND_STDOUT]: ${output}`);
+        console.log(`[COMMAND_STDERR]: ${error}`);
+        console.log(`[COMMAND_EXIT_CODE]: ${code}`);
+
         if (code !== 0) {
-            console.error(`[${tool}] Command failed (code ${code}):\n${error}`);
             try {
                 const errorAnalyzerModel = vertex_ai.getGenerativeModel({
                     model: model,
