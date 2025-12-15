@@ -33,26 +33,23 @@ const generativeModel = vertex_ai.preview.getGenerativeModel({
 
 **CRITICAL RULES:**
 
-1.  **YOUR ONLY JOB IS TO GENERATE COMMANDS:** You MUST NOT answer questions or carry on a conversation. Your ENTIRE response MUST be a single JSON object and nothing else. Do not add any conversational text before or after the JSON block.
+1.  **ONE COMMAND PER TURN:** You MUST ONLY generate the JSON for a SINGLE command in each turn.
 
-2.  **ONE COMMAND PER TURN:** You MUST ONLY generate the JSON for a SINGLE command in each turn.
-
-3.  **REMEMBER THE CONTEXT (PROJECT & LOCATION):** The user's project and location/region are critical.
+2.  **REMEMBER THE CONTEXT (PROJECT & LOCATION):** The user's project and location/region are critical.
     *   If the project or location is mentioned anywhere in the conversation history, you MUST remember it and use it in all subsequent commands (using --project and --location flags).
     *   You are FORBIDDEN from asking for the project or location if it has already been provided.
     *   If the project or location has NOT been provided, your entire response must be the single string: NEEDS_LOCATION or NEEDS_PROJECT.
 
-4.  **TWO-TURN STRATEGY FOR 'describe':** When the user asks for "details", "rules", or to "describe" a resource by its name (e.g., "details for 'Customer DQ Scan'"):
-    *   **TURN 1:** Your ONLY job is to find the resource's ID. You MUST generate the JSON for the appropriate "list" command with a "--filter" to find the resource by its name.
-    *   **TURN 2:** The system will execute the "list" command. The resulting ID will be in the history. In this second turn, you MUST generate the JSON for the "describe" command using the ID from the previous turn's output. You MUST include the "--view=full" flag for dataplex datascans.
+3.  **TWO-TURN STRATEGY FOR 'describe':** When the user asks for "details", "rules", or to "describe" a resource by its name (e.g., "details for 'Customer DQ Scan'"):
+    *   **TURN 1:** Your primary goal is to find the resource\'s ID. Generate the JSON for the appropriate "list" command with a "--filter" to find the resource by its name.
+    *   **TURN 2:** After the "list" command is executed, the resulting ID will be in the history. In this second turn, generate the JSON for the "describe" command using the ID. You MUST include the "--view=full" flag for dataplex datascans.
 
-5.  **JSON OUTPUT FORMAT:**
-    *   Your final output MUST be a single, valid JSON object enclosed in \`\`\`json markdown fences.
+4.  **JSON OUTPUT FORMAT:**
+    *   If you are generating a command, your response MUST contain a single, valid JSON object enclosed in \`\`\`json markdown fences.
     *   This object must contain a "tool" key (e.g., "gcloud") and an "args" key, which is an array of strings.
-    *   Example: { "tool": "gcloud", "args": ["dataplex", "datascans", "list", "--location=us-central1", "--project=my-project-id", "--filter=displayName='HANA Data Quality Scan'"] }
-
-**SUMMARIZATION CONTEXT (FOR SYSTEM USE, NOT YOURS):**
-*   After your command is run, the system will summarize the output. The system will look for 'dataQualitySpec' in 'gcloud dataplex datascans describe' output and explain the rules.
+    *   Example: { "tool": "gcloud", "args": ["dataplex", "datascans", "list", "--location=us-central1", "--project=my-project-id", "--filter=displayName=\'HANA Data Quality Scan\'"] }
+    *   If you are not generating a command (e.g., asking a clarifying question), you should respond in natural language. The system is designed to handle this.
+    
 `
         }]
     }
@@ -106,17 +103,16 @@ app.post("/", async (req: Request, res: Response) => {
             }
     
 
-        // If the model is asking a clarifying question, just return its response.
-        if (!text.includes('{')) {
-            return res.json({ response: text });
-        }
-        
         // --- ROBUST JSON PARSING LOGIC ---
         const startIndex = text.indexOf('{');
         const endIndex = text.lastIndexOf('}');
+
+        // If there's no valid JSON object, assume it's a conversational response and pass it to the frontend.
         if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
-            throw new Error("Could not find a valid JSON object in the model's response.");
+             console.log("[CONVERSATIONAL_RESPONSE]: No valid JSON found, treating as a conversational response.");
+             return res.json({ response: text });
         }
+        
         const cleanedText = text.substring(startIndex, endIndex + 1);
 
         const aiResponse = JSON.parse(cleanedText);
