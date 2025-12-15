@@ -20,7 +20,7 @@ interface RequestBody {
 }
 
 // --- Initialize Vertex AI and Express ---
-const vertex_ai = new VertexAI({ project: process.env.GOOGLE_CLOUD_PROJECT, location: 'us-central1' });
+const vertex_ai = new VertexAI({ project: process.env.GCLOUD_PROJECT, location: 'us-central1' });
 const model = 'gemini-2.5-flash';
 
 // --- AGENT BRAIN: The Dataplex Expert ---
@@ -32,19 +32,19 @@ const generativeModel = vertex_ai.preview.getGenerativeModel({
             text: `You are an expert AI assistant for Google Cloud, specializing in Dataplex and its related data resources like BigQuery. Your purpose is to generate commands for both Dataplex (using 'gcloud'), BigQuery (using the 'bq' tool) and Storage (using the 'gsutil' tool).
 
 **1. Command Generation & Strategy:**
-Your main job is to translate the user\'s natural language request into an appropriate, executable command JSON. You must be able to handle multi-turn conversations and proactively find information.
+Your main job is to translate the user\\'s natural language request into an appropriate, executable command JSON. You must be able to handle multi-turn conversations and proactively find information.
 
 *   **Conversational Context:** Assume follow-up questions relate to the most recently discussed resource. For example, if you just listed scans, and the user says "describe the first one", you must identify the first scan from the previous output and use its ID.
 
 *   **Proactive ID-Finding Strategy:** If a user asks for details about a resource by its display name (e.g., "get details of HANA Data Quality Scan"), you MUST follow this two-step process:
-    1.  **Find the ID:** First, generate a \`gcloud dataplex datascans list\` command with a \`--filter\` flag to isolate the specific resource by its display name (e.g., \`--filter="displayName='HANA Data Quality Scan'"\`).
-    2.  **Describe the Resource:** Once you have the resource ID from the output of the list command, automatically generate a second command, \`gcloud dataplex datascans describe <ID>\`, to get the details.
+    1.  **Find the ID:** First, generate a command to list the resource with a filter to find the specific display name.
+    2.  **Describe the Resource:** Once you have the resource ID from the output of the list command, automatically generate a second command to describe that resource by its ID.
 
-*   **Resource ID Integrity:** NEVER invent, guess, or hallucinate a resource ID (e.g., writing \`HANA-Data-Quality-Scan\` when the real ID is \`hana-data-quality-scan\`). If you cannot find the ID using a \`list\` command, inform the user.
+*   **Resource ID Integrity:** NEVER invent, guess, or hallucinate a resource ID. If you cannot find the ID using a \`list\` command, inform the user.
 
-*   **Handling Ambiguity:** If you need a location/region and the user hasn't provided one, your entire response MUST be the single string: \`NEEDS_LOCATION\`. Do not guess.
+*   **Handling Ambiguity:** If you need a location/region and the user hasn't provided one, your entire response MUST be the single string: \`NEEDS_LOCATION\`.
 
-*   **JSON Output Format:** Your final output for a command MUST be a single, valid JSON object enclosed in \`\`\`json markdown fences, containing \`tool\` and \`command\` keys.
+*   **JSON Output Format:** Your final output for a command MUST be a single, valid JSON object enclosed in \`\`\`json markdown fences. This object must contain a "tool" key (e.g., "gcloud", "bq") and an "args" key, which is an **array of strings** representing the command and its arguments. For example: { "tool": "gcloud", "args": ["dataplex", "datascans", "list", "--filter=displayName='HANA Data Quality Scan'"] }. Each part of the command, including flags and their values, should be elements in the array. If a flag and its value are a single unit (e.g., --filter=VALUE), they should be a single string in the array.
 
 **2. Result Summarization:**
 When asked to summarize command output, provide a concise, human-friendly summary. DO NOT repeat the raw output.
@@ -83,7 +83,7 @@ app.post("/", async (req: Request, res: Response) => {
     }
 
     let tool: string;
-    let command: string;
+    let args: string[];
     let yamlFilePath: string = '';
 
     try {
@@ -121,19 +121,23 @@ app.post("/", async (req: Request, res: Response) => {
 
         const aiResponse = JSON.parse(cleanedText);
         tool = aiResponse.tool;
-        command = aiResponse.command;
+        args = aiResponse.args; // Use the 'args' array directly
 
-        // --- STEP 2: Handle YAML for Data Quality Scans ---
+        // --- STEP 2: Handle YAML for Data Quality Scans (if needed) ---
         if (aiResponse.yaml_content) {
             const tempDir = os.tmpdir();
             const uniqueId = uuidv4();
             yamlFilePath = path.join(tempDir, `dataplex-scan-${uniqueId}.yaml`);
             await fs.writeFile(yamlFilePath, aiResponse.yaml_content);
-            command = command.replace('%%YAML_FILE_PATH%%', yamlFilePath);
+            // Find and replace the placeholder in the args array
+            const yamlPlaceholderIndex = args.findIndex(arg => arg.includes('%%YAML_FILE_PATH%%'));
+            if (yamlPlaceholderIndex > -1) {
+                args[yamlPlaceholderIndex] = args[yamlPlaceholderIndex].replace('%%YAML_FILE_PATH%%', yamlFilePath);
+            }
             console.log(`[Dataplex Agent] Created temporary YAML spec at: '${yamlFilePath}'`);
         }
 
-        console.log(`[Dataplex Agent] Tool: '${tool}', Command: '${command}'`);
+        console.log(`[Dataplex Agent] Tool: '${tool}', Args:`, args);
 
     } catch (error: any) {
         console.error("[Vertex AI] Error during command/YAML generation or parsing:", error);
@@ -148,8 +152,7 @@ app.post("/", async (req: Request, res: Response) => {
     if (!executablePath) {
         return res.status(403).json({ response: `The command tool '${tool}' is not in the list of allowed tools.` });
     }
-    const args = command.split(" ").filter(arg => arg);
-    if (args.length > 0 && args[0] === tool) args.shift();
+    // No more unreliable splitting! The 'args' array is used directly.
 
     const child = spawn(executablePath, args, {
         env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1", CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken },
