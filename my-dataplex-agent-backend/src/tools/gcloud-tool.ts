@@ -2,29 +2,38 @@
 import { exec } from 'child_process';
 import { DynamicTool } from "@langchain/core/tools";
 
+// Defines the structure of the object the LLM will pass to our tool.
+interface GcloudToolArgs {
+    input: string;
+}
+
 /**
  * Executes a gcloud command-line (gcloud CLI) command.
- * @param {string} command - The gcloud CLI command to execute (e.g., "dataplex datascans list --project=my-project").
- * @returns {Promise<string>} A promise that resolves to the stdout of the command, or an error message.
+ * The input is now an object containing the command string.
  */
-async function runGcloudCliCommand(command: string): Promise<string> {
+async function runGcloudCliCommand(args: GcloudToolArgs): Promise<string> {
+  // Extract the actual command from the 'input' property.
+  const command = args.input;
+
   console.log(`\n🤖 Executing gcloud CLI command: gcloud ${command}\n`);
+  
   return new Promise((resolve, reject) => {
-    // The `gcloud` command is expected to be in the PATH of the environment.
     exec(`gcloud ${command}`, (error, stdout, stderr) => {
       if (error) {
-        console.error(`ERROR executing gcloud command: ${error.message}`);
-        // Return both the error message and stderr for the agent to have more context
-        reject(`Error executing gcloud command: ${error.message}\nStderr: ${stderr}`);
+        const errorMessage = `Error executing gcloud command: ${error.message}\nStderr: ${stderr}`;
+        console.error(errorMessage);
+        reject(errorMessage);
         return;
       }
+      
       if (stderr && !stdout) {
-        // Sometimes gcloud prints warnings or non-fatal errors to stderr
-        console.warn(`WARN from gcloud command: ${stderr}`);
-        // Resolve with stderr if stdout is empty, so the agent sees the warning.
+        console.warn(`gcloud command produced a warning or error on stderr: ${stderr}`);
         resolve(stderr.trim());
+        return;
       }
-      resolve(stdout.trim()); // Trim to remove any leading/trailing whitespace
+
+      console.log(`gcloud command successful, stdout:\n${stdout}`);
+      resolve(stdout.trim());
     });
   });
 }
@@ -33,10 +42,8 @@ export const gcloudTool = new DynamicTool({
   name: "gcloud_cli_tool",
   description: `
     Useful for executing Google Cloud (gcloud) commands to manage and get metadata about cloud resources.
-    Use this for all interactions with Google Cloud services that have a gcloud command, especially Dataplex.
-    - **Listing Dataplex data scans:** (e.g., input: "dataplex datascans list --project=my-project-id --location=us-central1").
-    - **Describing a Dataplex data scan:** (e.g., input: "dataplex datascans describe my-scan-id --project=my-project-id --location=us-central1").
-    The input to this tool MUST be a valid 'gcloud' command string, WITHOUT the 'gcloud' prefix.
+    The input to this tool MUST be a JSON object with an 'input' key containing the command string to execute.
+    Example: { "input": "dataplex datascans list --project=my-project-id --location=us-central1" } 
   `,
   func: runGcloudCliCommand,
 });
