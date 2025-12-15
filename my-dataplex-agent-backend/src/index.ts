@@ -31,52 +31,29 @@ const generativeModel = vertex_ai.preview.getGenerativeModel({
         parts: [{
             text: `You are an expert AI assistant for Google Cloud, specializing in Dataplex and its related data resources like BigQuery. Your purpose is to generate commands for both Dataplex (using 'gcloud'), BigQuery (using the 'bq' tool) and Storage (using the 'gsutil' tool).
 
-**Core Dataplex Concepts:**
-*   **Data Quality Scans are the Default:** The \`gcloud dataplex datascans\` command group exclusively manages data quality scans. Therefore, you MUST NOT use a \`--type\` or \`--type=DATA_QUALITY\` filter when listing or describing scans. It will always cause an error.
-*   **Recognize Synonyms:** The user may refer to data quality scans using various terms. Treat all of the following as synonyms for \`gcloud dataplex datascans\`: "data quality job", "data quality jobs", "data quality scan", "data quality scans", "datascan", "datascans", "jobscans".
-*   **List vs. Describe:**
-    *   If the user asks to "list", "show", or "find" scans, use the \`gcloud dataplex datascans list\` command.
-    *   If the user asks for "details", "rules", "specifications", or information about a *specific* scan (e.g., "describe the scan named 'foo'"), your primary goal is to use the \`gcloud dataplex datascans describe\` command.
-    *   **CRITICAL:** When generating a 'describe' command, you **MUST** include the \`--view=full\` flag to retrieve all necessary details for rule analysis. For example: \`gcloud dataplex datascans describe my-scan-id --location=us-central1 --view=full\`.
-    *   To get the details, you will often need to first use the \`list\` command with a filter to find the scan's ID, and then immediately issue the \`describe\` command with that ID and the \`--view=full\` flag.
+**CRITICAL RULES:**
 
-**1. Command Generation & Strategy:**
-Your main job is to translate the user's natural language request into an appropriate, executable command JSON. You must be able to handle multi-turn conversations and proactively find information.
+1.  **YOUR ONLY JOB IS TO GENERATE COMMANDS:** You MUST NOT answer questions or carry on a conversation. Your ENTIRE response MUST be a single JSON object and nothing else. Do not add any conversational text before or after the JSON block.
 
-*   **Conversational Context:** Assume follow-up questions relate to the most recently discussed resource. For example, if you just listed scans, and the user says "describe the first one", you must identify the first scan from the previous output and use its ID.
+2.  **ONE COMMAND PER TURN:** You MUST ONLY generate the JSON for a SINGLE command in each turn.
 
-*   **Proactive ID-Finding Strategy:** If a user asks for details about a resource by its display name (e.g., "get details of HANA Data Quality Scan"), you MUST follow this two-step process:
-    1.  **Find the ID:** First, generate a command to list the resource with a filter to find the specific display name.
-    2.  **Describe the Resource:** Once you have the resource ID from the output of the list command, automatically generate a second command to describe that resource by its ID.
+3.  **REMEMBER THE CONTEXT (PROJECT & LOCATION):** The user's project and location/region are critical.
+    *   If the project or location is mentioned anywhere in the conversation history, you MUST remember it and use it in all subsequent commands (using --project and --location flags).
+    *   You are FORBIDDEN from asking for the project or location if it has already been provided.
+    *   If the project or location has NOT been provided, your entire response must be the single string: NEEDS_LOCATION or NEEDS_PROJECT.
 
-*   **Resource ID Integrity:** NEVER invent, guess, or hallucinate a resource ID. If you cannot find the ID using a \`list\` command, inform the user.
+4.  **TWO-TURN STRATEGY FOR 'describe':** When the user asks for "details", "rules", or to "describe" a resource by its name (e.g., "details for 'Customer DQ Scan'"):
+    *   **TURN 1:** Your ONLY job is to find the resource's ID. You MUST generate the JSON for the appropriate "list" command with a "--filter" to find the resource by its name.
+    *   **TURN 2:** The system will execute the "list" command. The resulting ID will be in the history. In this second turn, you MUST generate the JSON for the "describe" command using the ID from the previous turn's output. You MUST include the "--view=full" flag for dataplex datascans.
 
-*   **Handling Ambiguity:** If you need a location/region and the user has not provided one, your entire response MUST be the single string: \`NEEDS_LOCATION\`.
+5.  **JSON OUTPUT FORMAT:**
+    *   Your final output MUST be a single, valid JSON object enclosed in \`\`\`json markdown fences.
+    *   This object must contain a "tool" key (e.g., "gcloud") and an "args" key, which is an array of strings.
+    *   Example: { "tool": "gcloud", "args": ["dataplex", "datascans", "list", "--location=us-central1", "--project=my-project-id", "--filter=displayName='HANA Data Quality Scan'"] }
 
-*   **JSON Output Format:** 
-    *   Your final output for a command MUST be a single, valid JSON object enclosed in \`\`\`json markdown fences. This object must contain a "tool" key (e.g., "gcloud", "bq") and an "args" key, which is an **array of strings** representing the command and its arguments. For example: { "tool": "gcloud", "args": ["dataplex", "datascans", "list", "--filter=displayName='HANA Data Quality Scan'"] }.
-    *   **CRITICAL: ONE COMMAND PER TURN:** Your response for a single turn **MUST NEVER** contain more than one JSON object. If your strategy requires multiple commands (like finding an ID and then describing it), you must only output the *first* command. The system will execute it and provide the output in the next turn's history, at which point you can generate the second command.
-
-**2. Result Summarization:**
-When asked to summarize command output, provide a concise, human-friendly summary. DO NOT repeat the raw output.
-
-*   **CRITICAL INSTRUCTION for \`dataplex datascans describe\`:** When summarizing the output of this command, your HIGHEST PRIORITY is to find and explain the data quality rules. You MUST specifically look for the \`dataQualitySpec\` key. If this key exists:
-    *   Iterate through the \`rules\` array within it.
-    *   For each rule, you MUST explain:
-        *   The \`dimension\` (e.g., "COMPLETENESS").
-        *   The \`column\` it applies to.
-        *   The specific expectation (e.g., \`nonNullExpectation\`).
-    *   If \`dataQualitySpec\` or its \`rules\` are missing, you MUST state that no specific data quality rules are defined for the scan.
-
-**3. Error Interpretation:**
-When you are asked to interpret an error message, explain it simply. Do not repeat the raw error. If a resource is "not found", suggest checking the ID and location for typos.
-
-**4. Rule Creation (YAML Generation):**
-*   The user will eventually want to create new data quality scans and rules.
-*   Creating a data quality scan requires generating a YAML file that defines the scan's properties, including its rules.
-*   When the user asks to "create a scan" or "add a rule", your goal is to generate the appropriate YAML content and a \`gcloud dataplex datascans create\` or \`gcloud dataplex datascans update\` command that uses the \`--spec-file-path\` argument.
-*   You will need to ask clarifying questions to get the necessary details for the YAML file, such as the table to scan, the dimension, the column, and the rule type (e.g., non-null, range, regex).
-*   The final JSON output should include a \`yaml_content\` key containing the full YAML as a string, and the \`args\` for the \`gcloud\` command should use a placeholder \`%%YAML_FILE_PATH%%\` for the file path.`
+**SUMMARIZATION CONTEXT (FOR SYSTEM USE, NOT YOURS):**
+*   After your command is run, the system will summarize the output. The system will look for 'dataQualitySpec' in 'gcloud dataplex datascans describe' output and explain the rules.
+`
         }]
     }
 });
@@ -122,10 +99,12 @@ app.post("/", async (req: Request, res: Response) => {
 
         console.log(`[AI_RESPONSE]: ${text}`);
 
-        // --- Handle 'NEEDS_LOCATION' token ---
-        if (text === "NEEDS_LOCATION") {
-            return res.json({ response: "I can do that, but I need to know the Google Cloud location/region. Where should I look?" });
-        }
+            // --- Handle 'NEEDS_LOCATION' or 'NEEDS_PROJECT' tokens ---
+            if (text === "NEEDS_LOCATION" || text === "NEEDS_PROJECT") {
+                const missing = text.split('_')[1].toLowerCase();
+                return res.json({ response: `I can do that, but I need to know the Google Cloud ${missing}. Where should I look?` });
+            }
+    
 
         // If the model is asking a clarifying question, just return its response.
         if (!text.includes('{')) {
@@ -202,28 +181,28 @@ app.post("/", async (req: Request, res: Response) => {
                 console.error(`[Dataplex Agent] Failed to clean up temporary file: ${yamlFilePath}`, cleanupError.message);
             }
         }
+        
+        // --- NEW: Guardrail for empty output ---
+        // If there is no output and no error, it means the AI likely returned a conversational response instead of a command.
+        if (code === 0 && !output.trim() && !error.trim()) {
+            return res.status(400).json({ response: "I'm sorry, I wasn't able to generate a valid command for your request. Please try rephrasing your request to be more specific about the command you'd like to run." });
+        }
+
 
         // --- FINAL STEP: Summarize Success or Failure ---
         try {
             let summaryPrompt: string;
             if (code !== 0) {
                 // --- INTELLIGENT ERROR HANDLING ---
-                summaryPrompt = `Please provide a concise, human-friendly, natural-language explanation of this error for the user.
-                
-Original user request: "${userPrompt}"
-Error message:
-\`\`\`
-${error}
-\`\`\``;
+                summaryPrompt = `Please provide a concise, human-friendly, natural-language explanation of this error for the user.\n                \nOriginal user request: "${userPrompt}"\nError message:\n\`\`\`\n${error}\n\`\`\``;
             } else {
                 // --- SUCCESS SUMMARIZATION ---
-                summaryPrompt = `Please provide a concise, human-friendly, natural-language summary of this output for the user.
-                
-Original user request: "${userPrompt}"
-Command output:
-\`\`\`
-${output}
-\`\`\``;
+                 let summarizationInstruction = "Please provide a concise, human-friendly, natural-language summary of this output for the user.";
+                // Add specific instruction for dataplex datascans describe
+                if (args.includes("dataplex") && args.includes("datascans") && args.includes("describe")) {
+                    summarizationInstruction += ` Your HIGHEST PRIORITY is to find and explain the data quality rules from the 'dataQualitySpec' key. For each rule, explain the dimension, the column, and the specific expectation.`;
+                }
+                summaryPrompt = `${summarizationInstruction}\n\nOriginal user request: "${userPrompt}"\nCommand output:\n\`\`\`\n${output}\n\`\`\``;
             }
 
             const summaryResult = await generativeModel.generateContent(summaryPrompt);
