@@ -3,29 +3,44 @@ import { exec } from 'child_process';
 import { DynamicTool } from "@langchain/core/tools";
 
 /**
- * Executes a gcloud command-line (gcloud CLI) command.
- * The toolInput is now treated as the raw command string, which is what the agent is providing.
+ * The agent passes a string that CONTAINS JSON. We must parse it to get the command.
+ * This function correctly handles that specific input format.
  */
-async function runGcloudCliCommand(command: string): Promise<string> {
-  // No more JSON parsing. The input string is the command.
-  console.log(`\n🤖 Executing gcloud CLI command: gcloud ${command}\n`);
+async function runGcloudCliCommand(toolInput: string): Promise<string> {
+  let command = '';
 
-  // A simple validation to prevent accidental execution of malformed inputs.
-  if (!command || typeof command !== 'string' || command.includes('{')) {
-    return `Error: Invalid command format received. The gcloud_cli_tool expects a plain command string, but received: ${command}`;
+  try {
+    // The input is a stringified JSON object like '{"input":"gcloud command..."}'.
+    // We must parse it to extract the actual command.
+    const parsedInput = JSON.parse(toolInput);
+    command = parsedInput.input;
+
+    if (!command) {
+      throw new Error("The 'input' key was not found in the parsed JSON.");
+    }
+
+  } catch (e) {
+    // If parsing fails, it means the input format was not the expected stringified JSON.
+    // This is a fallback to prevent a crash and to provide a clear error to the agent.
+    const errorMessage = `FATAL: Tool received an input that was not a valid stringified JSON object with an 'input' key. Input was: ${toolInput}`;
+    console.error(errorMessage);
+    return errorMessage;
   }
+
+  console.log(`\n🤖 EXECUTING FINAL COMMAND: gcloud ${command}\n`);
 
   return new Promise((resolve, reject) => {
     exec(`gcloud ${command}`, (error, stdout, stderr) => {
       if (error) {
         const errorMessage = `Error executing gcloud command: ${error.message}\nStderr: ${stderr}`;
         console.error(errorMessage);
+        // Reject so the agent knows the tool itself failed.
         reject(errorMessage);
         return;
       }
 
       if (stderr && !stdout) {
-        console.warn(`gcloud command produced a warning on stderr: ${stderr}`);
+        console.warn(`gcloud command produced a warning or non-fatal error on stderr: ${stderr}`);
         resolve(stderr.trim());
         return;
       }
@@ -39,10 +54,9 @@ async function runGcloudCliCommand(command: string): Promise<string> {
 export const gcloudTool = new DynamicTool({
   name: "gcloud_cli_tool",
   description: `
-    Executes Google Cloud (gcloud) commands.
-    The input MUST be the command string to execute, without the 'gcloud' prefix.
-    Example: "dataplex datascans list --project=my-project-id --location=us-central1"
+    Executes Google Cloud (gcloud) commands. 
+    The input to this tool MUST be a stringified JSON object with an 'input' key containing the command.
+    Example: '{"input": "dataplex datascans list --project=my-project-id"}'
   `,
-  // The function now correctly accepts a string and treats it as a direct command.
   func: runGcloudCliCommand,
 });
