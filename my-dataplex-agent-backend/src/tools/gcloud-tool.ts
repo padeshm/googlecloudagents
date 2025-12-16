@@ -1,43 +1,45 @@
 
 import { exec } from 'child_process';
 import { DynamicTool } from "@langchain/core/tools";
+import { RunnableConfig } from '@langchain/core/runnables';
 
 /**
- * Executes a gcloud command. 
- * The function correctly accepts a plain string, which is what the AgentExecutor provides.
+ * Executes a gcloud command using the end-user's access token for authentication.
+ * The function now accepts the config object to access the token.
  */
-async function runGcloudCliCommand(command: string): Promise<string> {
-  console.log(`\n🤖 Correctly received command string. Executing: gcloud ${command}\n`);
+async function runGcloudCliCommand(command: string, config?: RunnableConfig): Promise<string> {
+  console.log(`\n🤖 Tool received command: gcloud ${command}`);
 
-  // A simple validation to ensure the input is a usable string.
-  if (!command || typeof command !== 'string') {
-    const errorMessage = `Tool Error: Expected a command string, but received an invalid input.`;
-    console.error(errorMessage);
-    return errorMessage; // Return the error for the agent to process.
+  // Extract the user's access token passed from the agent executor
+  const userAccessToken = config?.configurable?.userAccessToken;
+
+  if (!userAccessToken) {
+    const errorMsg = "Authentication Error: User access token not found. The tool cannot execute gcloud commands without it.";
+    console.error(errorMsg);
+    return errorMsg;
   }
 
   return new Promise((resolve) => {
-    // We use a Promise to handle the asynchronous nature of the 'exec' command.
-    // We will always 'resolve' the promise, even with an error message, 
-    // so the agent can process the tool's output instead of crashing.
-    exec(`gcloud ${command}`, (error, stdout, stderr) => {
+    exec(`gcloud ${command}`, {
+      // Set the environment variable for the gcloud command.
+      // gcloud will automatically use this token for authentication.
+      env: {
+        ...process.env,
+        CLOUDSDK_AUTH_ACCESS_TOKEN: userAccessToken,
+      },
+    }, (error, stdout, stderr) => {
       if (error) {
-        // This indicates a process-level error (e.g., command not found).
         const errorMessage = `Execution Error: ${error.message}\nStderr: ${stderr}`;
         console.error(errorMessage);
         resolve(errorMessage);
         return;
       }
-
       if (stderr && !stdout) {
-        // This handles cases where gcloud returns warnings or non-fatal errors.
-        const stderrMessage = `Command returned no output on stdout, but had this on stderr: ${stderr}`;
+        const stderrMessage = `Command may have failed. Stderr: ${stderr}`;
         console.warn(stderrMessage);
         resolve(stderr.trim());
         return;
       }
-
-      // This is the successful execution path.
       console.log(`gcloud command successful, stdout:\n${stdout}`);
       resolve(stdout.trim());
     });
@@ -47,8 +49,8 @@ async function runGcloudCliCommand(command: string): Promise<string> {
 export const gcloudTool = new DynamicTool({
   name: "gcloud_cli_tool",
   description: `
-    Executes Google Cloud (gcloud) commands.
-    The input to this tool MUST be a plain string containing the command to execute (without the 'gcloud' prefix).
+    Executes Google Cloud (gcloud) commands on behalf of the user.
+    The input MUST be a plain string containing the command to execute (without the 'gcloud' prefix).
     Example: "dataplex datascans list --project=my-project-id"
   `,
   func: runGcloudCliCommand,
