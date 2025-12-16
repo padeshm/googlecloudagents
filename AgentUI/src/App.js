@@ -58,7 +58,6 @@ const ChatbotTemplate = () => {
         {
             id: 'big-query-agent',
             name: 'Big Query Agent',
-            description: 'A semantic bridge to explore data and derive insights from BigQuery.',
             messages: [
                 { id: 1, type: 'bot', content: "Hello! I am the Big Query Agent. I act as a semantic bridge between natural language questions and SQL execution. My core intent is to abstract the complexity of Big Query into a set of tools that can help explore data and derive insights. How can I help you today?", timestamp: new Date().toISOString() }
             ],
