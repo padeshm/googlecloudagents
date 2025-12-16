@@ -4,47 +4,56 @@ import { DynamicTool } from "@langchain/core/tools";
 
 /**
  * Executes a BigQuery command-line (bq) command with impersonation.
- * @param {{input: string}} toolInput The tool input object, containing the command string.
+ * @param {string} inputString The stringified JSON input from the agent.
  * @param {import("@langchain/core/callbacks/manager").CallbackManagerForToolRun} [runManager] Optional run manager from LangChain.
- * @param {import("@langchain/core/runnables").RunnableConfig} [config] Optional config from LangChain, which should contain the user's access token.
+ * @param {import("@langchain/core/runnables").RunnableConfig} [config] Optional config from LangChain.
  * @returns {Promise<string>} A promise that resolves to the stdout of the command, or an error message.
  */
-async function runBqCliCommand(toolInput, runManager, config) {
-  const command = toolInput.input; // Destructure the command string from the input object
-  console.log(`\n🤖 Executing bq CLI command: bq ${command}`);
+async function runBqCliCommand(inputString, runManager, config) {
+  try {
+    // THE CRITICAL FIX: Parse the stringified JSON input from the agent
+    const toolInput = JSON.parse(inputString);
+    const command = toolInput.input;
 
-  const userAccessToken = config?.configurable?.userAccessToken;
+    console.log(`\n🤖 Executing bq CLI command: bq ${command}`);
 
-  if (!userAccessToken) {
-    const errorMsg = "Authentication Error: User access token not found.";
-    console.error(errorMsg);
-    return errorMsg;
-  }
+    const userAccessToken = config?.configurable?.userAccessToken;
 
-  return new Promise((resolve) => {
-    exec(`bq ${command}`,
-      {
-        env: {
-          ...process.env,
-          CLOUDSDK_AUTH_ACCESS_TOKEN: userAccessToken,
+    if (!userAccessToken) {
+      const errorMsg = "Authentication Error: User access token not found.";
+      console.error(errorMsg);
+      return errorMsg;
+    }
+
+    return new Promise((resolve) => {
+      exec(`bq ${command}`,
+        {
+          env: {
+            ...process.env,
+            CLOUDSDK_AUTH_ACCESS_TOKEN: userAccessToken,
+          },
         },
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          const errorMessage = `Execution Error: ${error.message}\nStderr: ${stderr}`;
-          console.error(errorMessage);
-          resolve(errorMessage);
-          return;
+        (error, stdout, stderr) => {
+          if (error) {
+            const errorMessage = `Execution Error: ${error.message}\nStderr: ${stderr}`;
+            console.error(errorMessage);
+            resolve(errorMessage);
+            return;
+          }
+          if (stderr && !stdout) {
+            console.warn(`bq command returned stderr: ${stderr}`);
+            resolve(stderr.trim());
+            return;
+          }
+          resolve(stdout.trim());
         }
-        if (stderr && !stdout) {
-          console.warn(`bq command returned stderr: ${stderr}`);
-          resolve(stderr.trim());
-          return;
-        }
-        resolve(stdout.trim());
-      }
-    );
-  });
+      );
+    });
+  } catch (e) {
+      const errorMessage = `Tool Error: Failed to parse input string: ${inputString}. Error: ${e.message}`;
+      console.error(errorMessage);
+      return errorMessage;
+  }
 }
 
 export const bqCliTool = new DynamicTool({
