@@ -20,6 +20,8 @@ const ChatbotTemplate = () => {
     const lightModeLogo = 'https://www.wipro.com/content/dam/wipro/social-icons/wipro_new_logo.svg';
     const darkModeLogo = 'https://companieslogo.com/img/orig/WIT.D-91671412.png?t=1739861069';
 
+    // --- CHANGE 1: ADD `conversationId` TO EACH AGENT'S STATE ---
+    // This allows each agent to maintain its own separate conversation history.
     const [agents, setAgents] = useState([
         {
             id: 'google-cloud-helper',
@@ -27,12 +29,13 @@ const ChatbotTemplate = () => {
             messages: [
                 { id: 1, type: 'bot', content: "Hello! I am the Google Cloud Storage Agent. You are looking for which project's storage buckets?", timestamp: new Date().toISOString() }
             ],
-            endpoint: 'https://mcp-server-backend-652176787350.us-central1.run.app/api/prompt'
+            endpoint: 'https://mcp-server-backend-652176787350.us-central1.run.app/api/prompt',
+            conversationId: null
         },
         {
             id: 'gcloud-command-executor',
             name: 'Google Cloud Command Agent',
-            description: null, // Removed description from here
+            description: null,
             messages: [
                 { 
                     id: 1, 
@@ -41,7 +44,8 @@ const ChatbotTemplate = () => {
                     timestamp: new Date().toISOString() 
                 }
             ],
-            endpoint: 'https://gcloud-mcp-server-652176787350.us-central1.run.app/api/gcloud'
+            endpoint: 'https://gcloud-mcp-server-652176787350.us-central1.run.app/api/gcloud',
+            conversationId: null
         },
         {
             id: 'data-quality-orchestration-agent',
@@ -49,7 +53,8 @@ const ChatbotTemplate = () => {
             messages: [
                 { id: 1, type: 'bot', content: "Hello! I am the Data Quality Orchestration Agent. How can I help you today?", timestamp: new Date().toISOString() }
             ],
-            endpoint: 'https://my-dataplex-agent-backend-652176787350.us-central1.run.app'
+            endpoint: 'https://my-dataplex-agent-backend-652176787350.us-central1.run.app',
+            conversationId: null
         }
     ]);
 
@@ -124,7 +129,6 @@ const ChatbotTemplate = () => {
         });
     };
 
-    // --- CORRECTED `handleSendMessage` function ---
     const handleSendMessage = async () => {
         if (!activeAgent || currentMessage.trim() === '' || !user || !gcpAccessToken) {
             if (!gcpAccessToken) alert("GCP Access Token is missing. Please sign in again.");
@@ -149,7 +153,22 @@ const ChatbotTemplate = () => {
         setCurrentMessage('');
 
         try {
-            const requestBody = { prompt: messageToSend, history: activeAgent.messages };
+            // --- CHANGE 2: CONDITIONALLY CREATE THE REQUEST BODY ---
+            // This ensures we don't break the other agents.
+            let requestBody;
+            if (activeAgent.id === 'data-quality-orchestration-agent') {
+                // For our NEW agent, we send the conversation_id.
+                requestBody = {
+                    prompt: messageToSend,
+                    conversation_id: activeAgent.conversationId
+                };
+            } else {
+                // For all OLD agents, we send the full history object as before.
+                requestBody = {
+                    prompt: messageToSend,
+                    history: activeAgent.messages
+                };
+            }
 
             const response = await fetch(activeAgent.endpoint, {
                 method: 'POST',
@@ -166,10 +185,7 @@ const ChatbotTemplate = () => {
                 throw new Error(data.response || data.error || `HTTP error! status: ${response.status}`);
             }
 
-            // --- THIS IS THE FIX ---
-            // Unified response handling for ALL agents.
-            // If the response has a 'response' key, treat it as a direct reply.
-            // Otherwise, fall back to the old 'history' key.
+            // --- CHANGE 3: SAFELY UPDATE STATE WITH CONVERSATION ID ---
             if (data.response) {
                 const botMessage = {
                     id: Date.now() + 1,
@@ -177,18 +193,26 @@ const ChatbotTemplate = () => {
                     content: data.response,
                     timestamp: new Date().toISOString(),
                 };
-                 setAgents(prevAgents => prevAgents.map(agent =>
-                    agent.id === currentAgentId ? { ...agent, messages: [...currentHistoryWithUserMessage, botMessage] } : agent
-                ));
+                 setAgents(prevAgents => prevAgents.map(agent => {
+                    if (agent.id === currentAgentId) {
+                        return {
+                            ...agent,
+                            messages: [...currentHistoryWithUserMessage, botMessage],
+                            // Only update the ID if the backend sends it back.
+                            // Otherwise, keep the old one. This is safe for other agents.
+                            conversationId: data.conversation_id || agent.conversationId
+                        };
+                    }
+                    return agent;
+                }));
 
-            } else if (data.history) { // Fallback for old agents
+            } else if (data.history) { // Keep this fallback for your other agents
                 setAgents(prevAgents => prevAgents.map(agent =>
                     agent.id === currentAgentId ? { ...agent, messages: data.history } : agent
                 ));
             } else {
                  throw new Error("The agent returned an unknown response format.");
             }
-            // --- END OF FIX ---
 
         } catch (error) {
             console.error("--- Error in handleSendMessage ---", error);
@@ -256,7 +280,7 @@ const ChatbotTemplate = () => {
                     <div className="flex items-center space-x-4">
                          <button
                             onClick={toggleDarkMode}
-                            className={`p-2 rounded-lg transition-colors ${
+                            className={`p-2 rounded-lg transition-colors ${''}
                                 isDarkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'
                             }`}
                         >
@@ -311,9 +335,9 @@ const ChatbotTemplate = () => {
                                 <div
                                     key={agent.id}
                                     onClick={() => setCurrentAgentId(agent.id)}
-                                    className={`p-4 border-b cursor-pointer transition-all duration-200 flex items-start group ${
+                                    className={`p-4 border-b cursor-pointer transition-all duration-200 flex items-start group ${''}
                                         isDarkMode ? 'border-gray-700 hover:bg-gray-700/50' : 'border-gray-200 hover:bg-gray-100'
-                                    } ${
+                                    } ${''}
                                         currentAgentId === agent.id
                                             ? isDarkMode ? 'bg-gray-700 shadow-inner' : 'bg-blue-50/70'
                                             : ''
@@ -342,7 +366,7 @@ const ChatbotTemplate = () => {
                                 <div
                                     key={message.id}
                                     className={`flex transition-all duration-300 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                    <div className={`max-w-3xl p-4 rounded-xl shadow-lg animate-fade-in ${
+                                    <div className={`max-w-3xl p-4 rounded-xl shadow-lg animate-fade-in ${''}
                                         message.type === 'user'
                                             ? 'bg-blue-600 text-white rounded-br-none'
                                             : isDarkMode ? 'bg-gray-700 text-gray-100 rounded-tl-none border border-gray-600' : 'bg-white text-gray-900 rounded-tl-none border border-gray-200 shadow-md'
