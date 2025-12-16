@@ -4,12 +4,13 @@ import { DynamicTool } from "@langchain/core/tools";
 
 /**
  * Executes a BigQuery SQL query with impersonation.
- * @param {string} query The SQL query to execute.
+ * @param {{input: string}} toolInput The tool input object, containing the SQL query string.
  * @param {import("@langchain/core/callbacks/manager").CallbackManagerForToolRun} [runManager] Optional run manager from LangChain.
  * @param {import("@langchain/core/runnables").RunnableConfig} [config] Optional config from LangChain, which should contain the user's access token.
  * @returns {Promise<string>} A promise that resolves to the query result as a JSON string, or an error message.
  */
-async function runBigQueryQuery(query, runManager, config) {
+async function runBigQueryQuery(toolInput, runManager, config) {
+  const query = toolInput.input; // Destructure the query string from the input object
   console.log(`\n🤖 Executing BigQuery query: ${query}`);
 
   // Extract the user's access token

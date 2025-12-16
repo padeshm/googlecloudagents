@@ -4,15 +4,15 @@ import { DynamicTool } from "@langchain/core/tools";
 
 /**
  * Executes a BigQuery command-line (bq) command with impersonation.
- * @param {string} command The bq CLI command to execute.
+ * @param {{input: string}} toolInput The tool input object, containing the command string.
  * @param {import("@langchain/core/callbacks/manager").CallbackManagerForToolRun} [runManager] Optional run manager from LangChain.
  * @param {import("@langchain/core/runnables").RunnableConfig} [config] Optional config from LangChain, which should contain the user's access token.
  * @returns {Promise<string>} A promise that resolves to the stdout of the command, or an error message.
  */
-async function runBqCliCommand(command, runManager, config) {
+async function runBqCliCommand(toolInput, runManager, config) {
+  const command = toolInput.input; // Destructure the command string from the input object
   console.log(`\n🤖 Executing bq CLI command: bq ${command}`);
 
-  // Extract the user's access token passed from the agent executor
   const userAccessToken = config?.configurable?.userAccessToken;
 
   if (!userAccessToken) {
@@ -22,7 +22,6 @@ async function runBqCliCommand(command, runManager, config) {
   }
 
   return new Promise((resolve) => {
-    // Execute the bq command with the user's access token
     exec(`bq ${command}`,
       {
         env: {
