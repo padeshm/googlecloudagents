@@ -2,27 +2,34 @@
 import { exec } from 'child_process';
 import { DynamicTool } from "@langchain/core/tools";
 import { RunnableConfig } from '@langchain/core/runnables';
+// This import is required to correctly type the function signature for the tool.
+import { CallbackManagerForToolRun } from "@langchain/core/callbacks/manager";
 
 /**
- * Executes a gcloud command using the end-user's access token for authentication.
- * The function now accepts the config object to access the token.
+ * Executes a gcloud command using the end-user's access token.
+ * The function signature now correctly matches the one expected by DynamicTool,
+ * including the optional 'runManager' as the second argument.
  */
-async function runGcloudCliCommand(command: string, config?: RunnableConfig): Promise<string> {
+async function runGcloudCliCommand(
+  command: string,
+  // The runManager is passed by the agent but is not used in this tool.
+  // It is included here to ensure the function signature is correct.
+  runManager?: CallbackManagerForToolRun,
+  // The config object, containing the access token, is now correctly the third parameter.
+  config?: RunnableConfig
+): Promise<string> {
   console.log(`\n🤖 Tool received command: gcloud ${command}`);
 
-  // Extract the user's access token passed from the agent executor
   const userAccessToken = config?.configurable?.userAccessToken;
 
   if (!userAccessToken) {
-    const errorMsg = "Authentication Error: User access token not found. The tool cannot execute gcloud commands without it.";
+    const errorMsg = "Authentication Error: User access token was not found in the tool's config. This is required for gcloud commands.";
     console.error(errorMsg);
     return errorMsg;
   }
 
   return new Promise((resolve) => {
     exec(`gcloud ${command}`, {
-      // Set the environment variable for the gcloud command.
-      // gcloud will automatically use this token for authentication.
       env: {
         ...process.env,
         CLOUDSDK_AUTH_ACCESS_TOKEN: userAccessToken,
@@ -53,5 +60,6 @@ export const gcloudTool = new DynamicTool({
     The input MUST be a plain string containing the command to execute (without the 'gcloud' prefix).
     Example: "dataplex datascans list --project=my-project-id"
   `,
+  // The function now has the correct signature that DynamicTool expects.
   func: runGcloudCliCommand,
 });
