@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import {
     User,
@@ -20,8 +19,7 @@ const ChatbotTemplate = () => {
     const lightModeLogo = 'https://www.wipro.com/content/dam/wipro/social-icons/wipro_new_logo.svg';
     const darkModeLogo = 'https://companieslogo.com/img/orig/WIT.D-91671412.png?t=1739861069';
 
-    // --- CHANGE 1: ADD `conversationId` TO EACH AGENT'S STATE ---
-    // This allows each agent to maintain its own separate conversation history.
+    // --- CHANGE 1: ADD THE NEW BIGQUERY AGENT ---
     const [agents, setAgents] = useState([
         {
             id: 'google-cloud-helper',
@@ -37,11 +35,11 @@ const ChatbotTemplate = () => {
             name: 'Google Cloud Command Agent',
             description: null,
             messages: [
-                { 
-                    id: 1, 
-                    type: 'bot', 
+                {
+                    id: 1,
+                    type: 'bot',
                     content: "Hello! I am your Google Cloud Command Agent. Here's a quick overview:\n• I can list resources, get metadata, and check permissions.\n• I work with `gcloud`, `gsutil`, `kubectl`, and `bq`.\n• I cannot run complex SQL data queries.\n• I do not support multiple commands or scripts.\n\n*Disclaimer: In some cases, I may not be able to generate a command, but I'll always try my best to help.*\n\nWhat can I do for you today?",
-                    timestamp: new Date().toISOString() 
+                    timestamp: new Date().toISOString()
                 }
             ],
             endpoint: 'https://gcloud-mcp-server-652176787350.us-central1.run.app/api/gcloud',
@@ -51,9 +49,20 @@ const ChatbotTemplate = () => {
             id: 'data-quality-orchestration-agent',
             name: 'Data Quality Orchestration Agent',
             messages: [
-                { id: 1, type: 'bot', content: "Hello! I am the Data Quality Orchestration Agent. How can I help you today?", timestamp: new Date().toISOString() }
+                { id: 1, type: 'bot', content: "Hello! I am the Data Quality Orchestration Agent. I can help you understand the Google Data Quality dataplex setup, rules and help you manage them. How can I help you today?", timestamp: new Date().toISOString() }
             ],
             endpoint: 'https://my-dataplex-agent-backend-652176787350.us-central1.run.app',
+            conversationId: null
+        },
+        // --- THIS IS THE NEW AGENT YOU ASKED FOR ---
+        {
+            id: 'big-query-agent',
+            name: 'Big Query Agent',
+            description: 'A semantic bridge to explore data and derive insights from BigQuery.',
+            messages: [
+                { id: 1, type: 'bot', content: "Hello! I am the Big Query Agent. I act as a semantic bridge between natural language questions and SQL execution. My core intent is to abstract the complexity of Big Query into a set of tools that can help explore data and derive insights. How can I help you today?", timestamp: new Date().toISOString() }
+            ],
+            endpoint: 'https://bq-agent-service-652176787350.us-central1.run.app/invoke', // Note the /invoke path
             conversationId: null
         }
     ]);
@@ -153,17 +162,17 @@ const ChatbotTemplate = () => {
         setCurrentMessage('');
 
         try {
-            // --- CHANGE 2: CONDITIONALLY CREATE THE REQUEST BODY ---
-            // This ensures we don't break the other agents.
+            // --- CHANGE 2: HANDLE REQUEST BODY FOR ALL AGENT TYPES ---
             let requestBody;
-            if (activeAgent.id === 'data-quality-orchestration-agent') {
-                // For our NEW agent, we send the conversation_id.
+            if (activeAgent.id === 'data-quality-orchestration-agent' || activeAgent.id === 'big-query-agent') {
+                // These agents use the new format with conversation_id
                 requestBody = {
-                    prompt: messageToSend,
+                    input: messageToSend, // BQ agent expects 'input'
+                    prompt: messageToSend, // Dataplex agent expects 'prompt'
                     conversation_id: activeAgent.conversationId
                 };
             } else {
-                // For all OLD agents, we send the full history object as before.
+                // The original agents use the old format
                 requestBody = {
                     prompt: messageToSend,
                     history: activeAgent.messages
@@ -182,15 +191,17 @@ const ChatbotTemplate = () => {
             const data = await response.json();
 
             if (!response.ok) {
-                throw new Error(data.response || data.error || `HTTP error! status: ${response.status}`);
+                throw new Error(data.response || data.output || data.error || `HTTP error! status: ${response.status}`);
             }
 
-            // --- CHANGE 3: SAFELY UPDATE STATE WITH CONVERSATION ID ---
-            if (data.response) {
+            // --- CHANGE 3: HANDLE RESPONSE FOR ALL AGENT TYPES ---
+            const botMessageContent = data.response || data.output;
+
+            if (botMessageContent) {
                 const botMessage = {
                     id: Date.now() + 1,
                     type: 'bot',
-                    content: data.response,
+                    content: botMessageContent,
                     timestamp: new Date().toISOString(),
                 };
                  setAgents(prevAgents => prevAgents.map(agent => {
@@ -198,15 +209,13 @@ const ChatbotTemplate = () => {
                         return {
                             ...agent,
                             messages: [...currentHistoryWithUserMessage, botMessage],
-                            // Only update the ID if the backend sends it back.
-                            // Otherwise, keep the old one. This is safe for other agents.
                             conversationId: data.conversation_id || agent.conversationId
                         };
                     }
                     return agent;
                 }));
 
-            } else if (data.history) { // Keep this fallback for your other agents
+            } else if (data.history) { // Fallback for the original agents
                 setAgents(prevAgents => prevAgents.map(agent =>
                     agent.id === currentAgentId ? { ...agent, messages: data.history } : agent
                 ));

@@ -1,3 +1,4 @@
+
 import express from "express";
 import cors from "cors";
 import { v4 as uuidv4 } from 'uuid';
@@ -19,7 +20,6 @@ const model = new ChatVertexAI({
 
 const tools = [bigQueryTool, bqCliTool];
 
-// The full system instructions for the agent.
 const systemPrompt = `You are a brilliant Google Cloud data analyst. Your goal is to answer user questions about BigQuery.
 
 **CRITICAL RULE: You require a Google Cloud Project ID to function.**
@@ -50,8 +50,6 @@ const systemPrompt = `You are a brilliant Google Cloud data analyst. Your goal i
     - If the request is about **querying data from a table (e.g., counting, summing, filtering rows)**, you MUST use the \`bigquery_sql_query\` tool.
     - Always ensure the project ID and any other necessary details are correctly included in the tool's input.`;
 
-// --- CORRECTED PROMPT TEMPLATE ---
-// This template now includes all three required placeholders: input, chat_history, and agent_scratchpad.
 const prompt = ChatPromptTemplate.fromMessages([
   ["system", systemPrompt],
   new MessagesPlaceholder("chat_history"),
@@ -71,10 +69,8 @@ const agentExecutor = new AgentExecutor({
   verbose: true,
 });
 
-// --- In-Memory Storage for Chat Histories ---
 const chatHistories = new Map();
 
-// --- Final, Production-Ready Web Server ---
 const app = express();
 const port = process.env.PORT || 8080;
 
@@ -83,12 +79,15 @@ app.use(cors());
 
 app.post("/invoke", async (req, res) => {
   try {
-    const { input } = req.body;
-    let conversation_id = req.body.conversation_id;
-    if (!conversation_id) {
-      conversation_id = uuidv4();
-      console.log(`New conversation started with ID: ${conversation_id}`);
+    // --- 1. Extract Access Token from Header ---
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: "Authorization Error: Bearer token not provided." });
     }
+    const userAccessToken = authHeader.split(' ')[1];
+
+    const { input } = req.body;
+    let conversation_id = req.body.conversation_id || uuidv4();
 
     if (!input) {
       return res.status(400).json({ error: "Request must include 'input'" });
@@ -98,9 +97,14 @@ app.post("/invoke", async (req, res) => {
     
     console.log(`\n---\nInvoking for conversation [${conversation_id}] with input: "${input}"\n---\n`);
 
+    // --- 2. Invoke Agent with User Token ---
     const result = await agentExecutor.invoke({
       input: input,
       chat_history: history,
+    }, {
+        configurable: {
+            userAccessToken: userAccessToken,
+        }
     });
 
     history.push(new HumanMessage(input));
@@ -111,7 +115,7 @@ app.post("/invoke", async (req, res) => {
 
   } catch (error) {
     console.error("Error invoking agent:", error);
-    res.status(500).json({ error: "Failed to invoke agent" });
+    res.status(500).json({ error: `Failed to invoke agent: ${error.message}` });
   }
 });
 
