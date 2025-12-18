@@ -1,5 +1,4 @@
-
-import express from "express";
+import express, { Request, Response } from "express";
 import cors from "cors";
 import { v4 as uuidv4 } from 'uuid';
 import { ChatVertexAI } from "@langchain/google-vertexai";
@@ -9,16 +8,20 @@ import {
   MessagesPlaceholder,
 } from "@langchain/core/prompts";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
-import { bigQueryTool } from "./src/tools/bigquery-tool.js";
-import { bqCliTool } from "./src/tools/bq-cli-tool.js";
+import { bqCliTool } from "./tools/bq-cli-tool.js";
+import { bigqueryTool } from "./tools/bigquery-tool.js";
 
-// --- Agent Configuration ---
+interface InvokeRequestBody {
+    prompt: string;
+    conversation_id?: string;
+}
+
 const model = new ChatVertexAI({
   model: "gemini-2.5-pro",
   temperature: 0,
 });
 
-const tools = [bigQueryTool, bqCliTool];
+const tools = [bqCliTool, bigqueryTool];
 
 const systemPrompt = `You are a brilliant Google Cloud data analyst. Your goal is to answer user questions about BigQuery.
 
@@ -28,7 +31,7 @@ const systemPrompt = `You are a brilliant Google Cloud data analyst. Your goal i
 1.  \`bigquery_sql_query\`:
     -   **Purpose:** Use this ONLY for running SQL queries against tables to retrieve actual data (e.g., sum sales, count users, find specific records).
     -   **Input:** MUST be a complete and valid BigQuery SQL query string.
-    -   **Syntax:** You MUST wrap all project, dataset, and table names in backticks (\`). Example: \`SELECT COUNT(*) FROM \`my-project.my_dataset.my_table\`\`
+    -   **Syntax:** You MUST wrap all project, dataset, and table names in backticks (\`\`). Example: \`SELECT COUNT(*) FROM \`my-project.my_dataset.my_table\`\`
 
 2.  \`bq_cli_tool\`:
     -   **Purpose:** Use this ONLY for BigQuery command-line (bq) operations, specifically for **metadata tasks** like:
@@ -48,7 +51,7 @@ const systemPrompt = `You are a brilliant Google Cloud data analyst. Your goal i
 4.  **IF a project ID IS available**:
     - If the request is about **listing datasets or tables, or getting general metadata (like schema)**, you MUST use the \`bq_cli_tool\`.
     - If the request is about **querying data from a table (e.g., counting, summing, filtering rows)**, you MUST use the \`bigquery_sql_query\` tool.
-    - Always ensure the project ID and any other necessary details are correctly included in the tool's input.`;
+    - Always ensure the project ID and any other necessary details are correctly included in the tool\'s input.`;
 
 const prompt = ChatPromptTemplate.fromMessages([
   ["system", systemPrompt],
@@ -74,51 +77,49 @@ const chatHistories = new Map();
 const app = express();
 const port = process.env.PORT || 8080;
 
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
-app.post("/invoke", async (req, res) => {
+app.post("/invoke", async (req: Request<{}, {}, InvokeRequestBody>, res: Response) => {
   try {
-    // --- 1. Extract Access Token from Header ---
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: "Authorization Error: Bearer token not provided." });
+      return res.status(401).json({ response: "Authorization Error: Bearer token not provided." });
     }
     const userAccessToken = authHeader.split(' ')[1];
 
-    const { input } = req.body;
-    let conversation_id = req.body.conversation_id || uuidv4();
+    const { prompt: input, conversation_id: convId } = req.body;
+    let conversation_id = convId || uuidv4();
 
     if (!input) {
-      return res.status(400).json({ error: "Request must include 'input'" });
+      return res.status(400).json({ response: "Request body must include 'prompt'" });
     }
 
     const history = chatHistories.get(conversation_id) || [];
-    
-    console.log(`\n---\nInvoking for conversation [${conversation_id}] with input: "${input}"\n---\n`);
 
-    // --- 2. Invoke Agent with User Token ---
+    console.log(`\\n---\\nInvoking agent for conversation [${conversation_id}] with input: \\"${input}\\"\\n---\\n`);
+
     const result = await agentExecutor.invoke({
       input: input,
       chat_history: history,
     }, {
-        configurable: {
-            userAccessToken: userAccessToken,
-        }
+      configurable: {
+        userAccessToken: userAccessToken,
+      }
     });
 
     history.push(new HumanMessage(input));
-    history.push(new AIMessage(result.output));
+    history.push(new AIMessage(result.output as string));
     chatHistories.set(conversation_id, history);
 
-    res.json({ output: result.output, conversation_id: conversation_id });
+    res.json({ response: result.output, conversation_id: conversation_id });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error invoking agent:", error);
-    res.status(500).json({ error: `Failed to invoke agent: ${error.message}` });
+    res.status(500).json({ response: `Failed to invoke agent: ${error.message}` });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Agent server listening on http://localhost:${port}`);
+  console.log(`BQ Agent server listening on http://localhost:${port}`);
 });

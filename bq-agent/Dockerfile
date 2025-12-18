@@ -1,35 +1,49 @@
-# Use an official Node.js runtime as a parent image
-FROM node:20
 
-# Install the Google Cloud SDK, which includes bq
+# Use a lightweight Node image
+FROM node:20-slim
+
+# 1. Install System Dependencies & kubectl
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    gnupg \
+    python3 && \
+    mkdir -p -m 755 /etc/apt/keyrings && \
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg && \
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /' | tee /etc/apt/sources.list.d/kubernetes.list && \
+    apt-get update && \
+    apt-get install -y kubectl && \
+    rm -rf /var/lib/apt/lists/*
+
+# 2. Manually Install the Google Cloud SDK for full control
 ENV GCLOUD_SDK_VERSION=468.0.0
 ENV GCLOUD_SDK_URL="https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-${GCLOUD_SDK_VERSION}-linux-x86_64.tar.gz"
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl python3 && \
-    curl -O ${GCLOUD_SDK_URL} && \
+# Download, extract, install, and create symbolic links
+RUN curl -O ${GCLOUD_SDK_URL} && \
     tar -xf google-cloud-cli-${GCLOUD_SDK_VERSION}-linux-x86_64.tar.gz && \
     rm google-cloud-cli-${GCLOUD_SDK_VERSION}-linux-x86_64.tar.gz && \
     ./google-cloud-sdk/install.sh --quiet --usage-reporting=false --path-update=true && \
     ln -s /google-cloud-sdk/bin/gcloud /usr/bin/gcloud && \
-    ln -s /google-cloud-sdk/bin/bq /usr/bin/bq
+    ln -s /google-cloud-sdk/bin/bq /usr/bin/bq && \
+    ln -s /google-cloud-sdk/bin/gsutil /usr/bin/gsutil
 
-# Add gcloud to the PATH for all future sessions
+# Add gcloud to the PATH for all future sessions (good practice)
 ENV PATH /google-cloud-sdk/bin:$PATH
 
-# Set the working directory in the container
+# 3. Application Setup
 WORKDIR /app
 
-# Copy package.json and package-lock.json
+# Install dependencies
 COPY package*.json ./
+RUN npm install
 
-# Install app dependencies
-RUN npm ci
+# Copy source code
+COPY tsconfig.json ./
+COPY src ./src
 
-# Copy the rest of your application code
-COPY . .
+# Build TypeScript to JavaScript
+RUN npm run build
 
-# Your app binds to a port, default is 8080
-EXPOSE 8080
-
-# Define the command to run your app
-CMD ["node", "index.js"]
+# 4. Start the Server
+CMD ["npm", "start"]
