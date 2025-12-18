@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Triggering CI/CD
 import express from "express";
 import cors from "cors";
 import { spawn } from "child_process";
@@ -6,7 +7,7 @@ import { Content, VertexAI } from '@google-cloud/vertexai';
 
 // --- Initialize Vertex AI and Express ---
 const vertex_ai = new VertexAI({ project: process.env.GCLOUD_PROJECT, location: 'us-central1' });
-const model = 'gemini-2.5-flash';
+const model = 'gemini-2.5-pro';
 
 // --- AGENT BRAIN 1: The Command Generator ---
 const generativeModel = vertex_ai.getGenerativeModel({
