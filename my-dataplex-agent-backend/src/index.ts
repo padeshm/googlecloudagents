@@ -10,14 +10,6 @@ import {
 } from "@langchain/core/prompts";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import { gcloudTool } from "./tools/gcloud-tool.js";
-import { getCapabilities } from "./commands/capabilities.js";
-import { listDataQualityRules, createDataQualityRule, updateDataQualityRule } from "./commands/data-quality.js";
-import { createAndRunDataProfilingScan } from "./commands/data-profiling.js";
-
-interface InvokeRequestBody {
-    prompt: string;
-    conversation_id?: string;
-}
 
 const model = new ChatVertexAI({
   model: "gemini-2.5-pro",
@@ -26,30 +18,55 @@ const model = new ChatVertexAI({
 
 const tools = [gcloudTool];
 
-const systemPrompt = `You are a highly capable Google Cloud assistant specializing in Dataplex. Your primary goal is to help users by executing gcloud commands on their behalf.
+const systemPrompt = `
+    You are a Google Cloud assistant who is an expert in Dataplex.
+    You have been provided with a tool that can execute gcloud CLI commands.
+    Your primary purpose is to assist users by executing gcloud commands on their behalf.
 
-**CAPABILITIES:**
+    **IMPORTANT RULES**
 
-When asked "what can you do" or about your capabilities, you MUST respond with the exact output of the 'getCapabilities' function.
+    1.  **Tool Usage**: You have been provided with a tool that can execute gcloud commands. When you need to perform an action, you MUST use this tool.
 
-**CRITICAL RULES:**
+    2.  **Project and Location**: You will often need the Google Cloud Project ID and a location/region.
+        *   First, check the user's most recent message for this information.
+        *   If it's not in the most recent message, scan the conversation history.
+        *   If you still cannot find a project or location, you MUST ask the user to provide it. For example: "I can help with that, but first I need the Google Cloud Project ID and location. Could you please provide them?"
 
-1.  **PROJECT & LOCATION AWARENESS:** You often need a Google Cloud Project ID and a Location/Region.
-    *   First, check the user's most recent message for this information.
-    *   If not found, scan the conversation history.
-    *   **IF a project or location is still missing**, you MUST stop and ask the user to provide it. Example response: "I can help with that, but I need the Google Cloud Project ID and location. Could you please provide them?"
+    3.  **Resource Description**: When a user asks you to "describe" a resource and provides a display name (e.g., "details for 'My DQ Scan'"), you MUST first use the gcloud_cli_tool with a 'list' command and a '--filter' to find the resource's full unique ID. Then, you can use the 'describe' command with the full ID. Do not try to guess the ID.
 
-2.  **TWO-STEP RESOURCE DESCRIPTION:** When a user asks for details about a resource by its display name (e.g., "details for 'My DQ Scan'"), you MUST use a two-step process:
-    *   **STEP 1:** Use the 'gcloud_cli_tool' with a 'list' command and a '--filter' to find the resource's full, unique ID.
-    *   **STEP 2:** Use the 'gcloud_cli_tool' again with the 'describe' command and the full ID from Step 1. Do not guess IDs.
+    4.  **Replying to the User**: When you have the output from a tool, you should not just show the user the raw output. Instead, you MUST summarize the output in a clear and easy-to-understand way.
 
-3.  **DATA QUALITY & PROFILING:**
-    *   When asked to list data quality rules, use the 'listDataQualityRules' function.
-    *   When asked to create a data quality rule, use the 'createDataQualityRule' function.
-    *   When asked to update a data quality rule, use the 'updateDataQualityRule' function.
-    *   When asked to run a data profiling scan, use the 'createAndRunDataProfilingScan' function.
+    **DATAPLEX CAPABILITIES**
 
-4.  **TOOL SYNTAX:** Always include the '--project=' and '--location=' flags in your commands.
+    You are an expert in Dataplex and can help with a variety of tasks. Here are some of the things you can do:
+
+    *   **General Information**: You can answer general questions about Dataplex, such as "What is a lake?" or "How do I create a zone?"
+    *   **Assets**: You can list and describe assets in a lake.
+    *   **Data Quality**: You can help users create, manage, and run data quality scans.
+        *   **Listing Scans**: "list data quality scans" or "show me the data quality jobs"
+        *   **Get Details**: "describe the data quality scan 'my-scan'"
+    *   **Data Profiling**: You can help users create and run data profiling scans.
+        *   **Example**: "run a data profiling scan on the table 'my-table'"
+
+    **GCLOUD COMMAND EXAMPLES**
+
+    Here are some examples of how to format gcloud commands. You should always include the '--project=' and '--location=' flags.
+
+    *   **Dataplex - Data Quality Scans**
+        *   **List**: gcloud dataplex data-scans list --project=my-project-id --location=us-central1
+        *   **Describe**: gcloud dataplex data-scans describe my-scan-id --project=my-project-id --location=us-central1
+        *   **Run**: gcloud dataplex data-scans run my-scan-id --project=my-project-id --location=us-central1
+        *   **Delete**: gcloud dataplex data-scans delete my-scan-id --project=my-project-id --location=us-central1
+
+    *   **Dataplex - Data Profiling Scans**
+        *   **Run**: gcloud dataplex data-scans create --project=my-project-id --location=us-central1 --body='{ "data_profile_spec": {}, "data": { "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" } }'
+
+    When you are creating a data profiling scan, you MUST use the format shown above. The 'resource' should be the full BigQuery path to the table.
+
+    *   **BigQuery**
+        *   **List Datasets**: gcloud bq datasets list --project=my-project-id
+        *   **List Tables**: gcloud bq tables list --dataset=my-dataset --project=my-project-id
+        *   **Describe Table**: gcloud bq tables describe my-table --dataset=my-dataset --project=my-project-id
 `;
 
 const prompt = ChatPromptTemplate.fromMessages([
@@ -71,6 +88,7 @@ const agentExecutor = new AgentExecutor({
   verbose: true,
 });
 
+// A map to store chat histories, with conversation_id as the key.
 const chatHistories = new Map();
 
 const app = express();
@@ -79,7 +97,7 @@ const port = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
-app.post("/", async (req: Request<{}, {}, InvokeRequestBody>, res: Response) => {
+app.post("/", async (req: Request, res: Response) => {
   try {
     // --- 1. Extract Access Token from Header ---
     // The frontend must now send the user's token in the Authorization header.
@@ -90,12 +108,15 @@ app.post("/", async (req: Request<{}, {}, InvokeRequestBody>, res: Response) => 
     const userAccessToken = authHeader.split(' ')[1];
 
     const { prompt: input, conversation_id: convId } = req.body;
+
+    // If no conversation_id is provided, create a new one.
     let conversation_id = convId || uuidv4();
 
     if (!input) {
       return res.status(400).json({ response: "Request body must include 'prompt'" });
     }
 
+    // Retrieve the chat history for this conversation, or create a new one.
     const history = chatHistories.get(conversation_id) || [];
     
     console.log(`\n---\nInvoking agent for conversation [${conversation_id}] with input: \"${input}\"\n---\n`);
@@ -107,18 +128,14 @@ app.post("/", async (req: Request<{}, {}, InvokeRequestBody>, res: Response) => 
       input: input,
       chat_history: history,
     }, {
-      configurable: {
-        userAccessToken: userAccessToken,
-        getCapabilities,
-        listDataQualityRules,
-        createDataQualityRule,
-        updateDataQualityRule,
-        createAndRunDataProfilingScan
-      }
+      configurable: { userAccessToken: userAccessToken }
     });
 
+    // Add the latest interaction to the chat history.
     history.push(new HumanMessage(input));
     history.push(new AIMessage(result.output as string));
+
+    // Save the updated chat history.
     chatHistories.set(conversation_id, history);
 
     res.json({ response: result.output, conversation_id: conversation_id });
