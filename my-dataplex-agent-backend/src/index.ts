@@ -60,7 +60,7 @@ async function startServer() {
             *   **Delete**: gcloud dataplex data-scans delete my-scan-id --project=my-project-id --location=us-central1
 
         *   **Dataplex - Data Profiling Scans**
-            *   **Run**: gcloud dataplex data-scans create --project=my-project-id --location=us-central1 --body='{ "data_profile_spec": {}, "data": { "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" } }'
+            *   **Run**: gcloud dataplex data-scans create --project=my-project-id --location=us-central1 --body='{{ "data_profile_spec": {{}}, "data": {{ "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" }} }}'
 
         When you are creating a data profiling scan, you MUST use the format shown above. The 'resource' should be the full BigQuery path to the table.
 
@@ -156,4 +156,7 @@ Invoking agent for conversation [${conversation_id}] with input: "${input}"
     });
 }
 
-startServer().catch(console.error);
+startServer().catch(error => {
+  console.error("Failed to start server:", error);
+  process.exit(1);
+});
