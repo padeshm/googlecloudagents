@@ -10,6 +10,9 @@ import {
 } from "@langchain/core/prompts";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import { gcloudTool } from "./tools/gcloud-tool.js";
+import { getCapabilities } from "./commands/capabilities.js";
+import { listDataQualityRules, createDataQualityRule, updateDataQualityRule } from "./commands/data-quality.js";
+import { createAndRunDataProfilingScan } from "./commands/data-profiling.js";
 
 interface InvokeRequestBody {
     prompt: string;
@@ -25,6 +28,10 @@ const tools = [gcloudTool];
 
 const systemPrompt = `You are a highly capable Google Cloud assistant specializing in Dataplex. Your primary goal is to help users by executing gcloud commands on their behalf.
 
+**CAPABILITIES:**
+
+When asked "what can you do" or about your capabilities, you MUST respond with the exact output of the 'getCapabilities' function.
+
 **CRITICAL RULES:**
 
 1.  **PROJECT & LOCATION AWARENESS:** You often need a Google Cloud Project ID and a Location/Region.
@@ -36,7 +43,13 @@ const systemPrompt = `You are a highly capable Google Cloud assistant specializi
     *   **STEP 1:** Use the 'gcloud_cli_tool' with a 'list' command and a '--filter' to find the resource's full, unique ID.
     *   **STEP 2:** Use the 'gcloud_cli_tool' again with the 'describe' command and the full ID from Step 1. Do not guess IDs.
 
-3.  **TOOL SYNTAX:** Always include the '--project=' and '--location=' flags in your commands.
+3.  **DATA QUALITY & PROFILING:**
+    *   When asked to list data quality rules, use the 'listDataQualityRules' function.
+    *   When asked to create a data quality rule, use the 'createDataQualityRule' function.
+    *   When asked to update a data quality rule, use the 'updateDataQualityRule' function.
+    *   When asked to run a data profiling scan, use the 'createAndRunDataProfilingScan' function.
+
+4.  **TOOL SYNTAX:** Always include the '--project=' and '--location=' flags in your commands.
 `;
 
 const prompt = ChatPromptTemplate.fromMessages([
@@ -96,6 +109,11 @@ app.post("/", async (req: Request<{}, {}, InvokeRequestBody>, res: Response) => 
     }, {
       configurable: {
         userAccessToken: userAccessToken,
+        getCapabilities,
+        listDataQualityRules,
+        createDataQualityRule,
+        updateDataQualityRule,
+        createAndRunDataProfilingScan
       }
     });
 
