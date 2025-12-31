@@ -120,7 +120,11 @@ async function startServer() {
         // Retrieve the chat history for this conversation, or create a new one.
         const history = chatHistories.get(conversation_id) || [];
         
-        console.log(`\n---\nInvoking agent for conversation [${conversation_id}] with input: \"${input}\"\n---\n`);
+        console.log(`
+---
+Invoking agent for conversation [${conversation_id}] with input: "${input}"
+---
+`);
 
         // --- 2. Invoke Agent with User Token ---
         // Pass the token to the agent executor via the 'configurable' property.
@@ -143,12 +147,12 @@ async function startServer() {
 
       } catch (error: any) {
         console.error("Error invoking agent:", error);
-        res.status(500).json({ response: \`Failed to invoke agent: ${error.message}\` });
+        res.status(500).json({ response: `Failed to invoke agent: ${error.message}` });
       }
     });
 
     app.listen(port, () => {
-      console.log(\`Dataplex Langchain Agent server listening on http://localhost:${port}\`);
+      console.log(`Dataplex Langchain Agent server listening on http://localhost:${port}`);
     });
 }
 
