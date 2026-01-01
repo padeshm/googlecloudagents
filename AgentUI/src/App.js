@@ -288,7 +288,7 @@ const ChatbotTemplate = () => {
                     <div className="flex items-center space-x-4">
                          <button
                             onClick={toggleDarkMode}
-                            className={`p-2 rounded-lg transition-colors ${''}
+                            className={`p-2 rounded-lg transition-colors ${
                                 isDarkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'
                             }`}
                         >
@@ -343,9 +343,9 @@ const ChatbotTemplate = () => {
                                 <div
                                     key={agent.id}
                                     onClick={() => setCurrentAgentId(agent.id)}
-                                    className={`p-4 border-b cursor-pointer transition-all duration-200 flex items-start group ${''}
+                                    className={`p-4 border-b cursor-pointer transition-all duration-200 flex items-start group ${
                                         isDarkMode ? 'border-gray-700 hover:bg-gray-700/50' : 'border-gray-200 hover:bg-gray-100'
-                                    } ${''}
+                                    } ${
                                         currentAgentId === agent.id
                                             ? isDarkMode ? 'bg-gray-700 shadow-inner' : 'bg-blue-50/70'
                                             : ''
@@ -374,7 +374,7 @@ const ChatbotTemplate = () => {
                                 <div
                                     key={message.id}
                                     className={`flex transition-all duration-300 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                    <div className={`max-w-3xl p-4 rounded-xl shadow-lg animate-fade-in ${''}
+                                    <div className={`max-w-3xl p-4 rounded-xl shadow-lg animate-fade-in ${
                                         message.type === 'user'
                                             ? 'bg-blue-600 text-white rounded-br-none'
                                             : isDarkMode ? 'bg-gray-700 text-gray-100 rounded-tl-none border border-gray-600' : 'bg-white text-gray-900 rounded-tl-none border border-gray-200 shadow-md'
