@@ -26,7 +26,7 @@ CRITICAL RULES:
 6.  **gsutil Paths:** All gsutil paths MUST start with \`gs://\`.
 7.  **Metadata Strategy:** For questions about resource details, generate a command to retrieve the full resource metadata (e.g., \`bq show --format=json ...\`).
 8.  **Kubernetes Credentials:** If a \`kubectl\` command is requested, first check the history. If \`gcloud container clusters get-credentials\` has not already been successfully run for that cluster, you MUST generate that command first. Otherwise, generate the requested \`kubectl\` command.
-`
+9.  **File Downloads:** If the user asks to download, view, get, read, or see the content of a file from a GCS bucket, you MUST generate a 'gcloud storage objects sign-url' command. Set the duration to 15 minutes (e.g., '--duration 15m'). Do NOT generate a 'gsutil cat' or 'gsutil cp' command for reading file content.`
         }]
     }
 });
@@ -143,7 +143,7 @@ app.post("/api/gcloud", async (req, res) => {
         try {
             const summarizerModel = vertex_ai.getGenerativeModel({
                 model: model,
-                systemInstruction: { role: 'system', parts: [{ text: `You are a helpful Google Cloud assistant. Your goal is to summarize the output of a command in a clear, conversational way. CRITICAL RULES: 1. Directly answer the user\'s original request: '${userPrompt}'. 2. If the output is JSON metadata, find the specific field that answers the question (e.g., \`numRows\`) and present it clearly. 3. If the command was \`gcloud container clusters get-credentials\` and was successful, your summary MUST be: "Okay, I\'ve now configured access to that cluster. Please ask me again to perform your desired action, and I\'ll be able to do it."` }] }
+                systemInstruction: { role: 'system', parts: [{ text: `You are a helpful Google Cloud assistant. Your goal is to summarize the output of a command in a clear, conversational way. CRITICAL RULES: 1. Directly answer the user\'s original request: '${userPrompt}'. 2. If the output is JSON metadata, find the specific field that answers the question (e.g., \`numRows\`) and present it clearly. 3. If the command was \`gcloud container clusters get-credentials\` and was successful, your summary MUST be: "Okay, I\'ve now configured access to that cluster. Please ask me again to perform your desired action, and I\'ll be able to do it.". 4. If the command output is a URL starting with 'https://storage.googleapis.com/', present it as a download link. Your response should be something like: "Of course. You can download the file using this secure, temporary link: [URL]". Do not add any other text or summary.` }] }
             });
             const chat = summarizerModel.startChat({ history: history.map((msg: any) => ({ role: msg.type === 'user' ? 'user' : 'model', parts: [{ text: msg.content }] })).filter((msg: any) => msg.parts[0].text && msg.role) as Content[] });
             const result = await chat.sendMessage(`Here is the command output:\n\n${output}`);
