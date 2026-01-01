@@ -106,9 +106,22 @@ app.post("/api/gcloud", async (req, res) => {
     const args = command.split(" ").filter(arg => arg);
     if (args.length > 0 && args[0] === tool) args.shift();
 
-    console.log(`[EXECUTION_ENV]: ${JSON.stringify(process.env)}`);
+    const env: { [key: string]: string | undefined } = {
+        ...process.env,
+        CLOUDSDK_CORE_DISABLE_PROMPTS: "1",
+    };
+
+    // The 'sign-url' command needs to use the service account credentials to create a cryptographic signature,
+    // and it cannot do this with a user's temporary access token. By NOT providing the access token
+    // for this specific command, we allow gcloud to fall back to the container's ambient
+    // service account credentials, which have the necessary permissions.
+    if (!command.includes('storage sign-url')) {
+        env.CLOUDSDK_AUTH_ACCESS_TOKEN = accessToken;
+    }
+
+    console.log(`[EXECUTION_ENV]: ${JSON.stringify(env)}`);
     const child = spawn(executablePath, args, {
-        env: { ...process.env, CLOUDSDK_CORE_DISABLE_PROMPTS: "1", CLOUDSDK_AUTH_ACCESS_TOKEN: accessToken },
+        env: env as any
     });
 
     let output = "";
