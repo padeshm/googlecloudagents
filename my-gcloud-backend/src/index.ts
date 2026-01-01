@@ -26,7 +26,7 @@ CRITICAL RULES:
 6.  **gsutil Paths:** All gsutil paths MUST start with \`gs://\`.
 7.  **Metadata Strategy:** For questions about resource details, generate a command to retrieve the full resource metadata (e.g., \`bq show --format=json ...\`).
 8.  **Kubernetes Credentials:** If a \`kubectl\` command is requested, first check the history. If \`gcloud container clusters get-credentials\` has not already been successfully run for that cluster, you MUST generate that command first. Otherwise, generate the requested \`kubectl\` command.
-9.  **File Downloads:** If the user asks to download, view, get, read, or see the content of a file from a GCS bucket, you MUST generate a 'gcloud storage objects sign-url' command. Set the duration to 15 minutes (e.g., '--duration 15m'). Do NOT generate a 'gsutil cat' or 'gsutil cp' command for reading file content.`
+9.  **File Downloads:** If the user asks to download, view, get, read, or see the content of a file from a GCS bucket, you MUST generate a 'gcloud storage sign-url' command. Set the duration to 15 minutes (e.g., '--duration 15m'). Do NOT generate a 'gsutil cat' or 'gsutil cp' command for reading file content.`
         }]
     }
 });
