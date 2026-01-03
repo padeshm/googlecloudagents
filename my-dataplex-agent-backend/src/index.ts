@@ -1,4 +1,3 @@
-
 import express, { Request, Response } from "express";
 import cors from "cors";
 import { v4 as uuidv4 } from 'uuid';
@@ -15,6 +14,7 @@ async function startServer() {
     const model = new ChatVertexAI({
       model: "gemini-2.5-pro",
       temperature: 0,
+      maxOutputTokens: 8192,
     });
 
     const tools = [gcloudTool];
@@ -56,13 +56,13 @@ async function startServer() {
         Here are some examples of how to format gcloud commands. You should always include the '--project=' and '--location=' flags.
 
         *   **Dataplex - Data Quality Scans**
-            *   **List**: gcloud dataplex data-scans list --project=my-project-id --location=us-central1
-            *   **Describe**: gcloud dataplex data-scans describe my-scan-id --project=my-project-id --location=us-central1
-            *   **Run**: gcloud dataplex data-scans run my-scan-id --project=my-project-id --location=us-central1
-            *   **Delete**: gcloud dataplex data-scans delete my-scan-id --project=my-project-id --location=us-central1
+            *   **List**: gcloud dataplex datascans list --project=my-project-id --location=us-central1
+            *   **Describe**: gcloud dataplex datascans describe my-scan-id --project=my-project-id --location=us-central1
+            *   **Run**: gcloud dataplex datascans run my-scan-id --project=my-project-id --location=us-central1
+            *   **Delete**: gcloud dataplex datascans delete my-scan-id --project=my-project-id --location=us-central1
 
         *   **Dataplex - Data Profiling Scans**
-            *   **Run**: gcloud dataplex data-scans create --project=my-project-id --location=us-central1 --body='[[ "data_profile_spec": {{}}, "data": {{ "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" }} }}'
+            *   **Run**: gcloud dataplex datascans create --project=my-project-id --location=us-central1 --body='[[ "data_profile_spec": {{}}, "data": {{ "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" }} }}'
 
         When you are creating a data profiling scan, you MUST use the format shown above. The 'resource' should be the full BigQuery path to the table.
     `;
