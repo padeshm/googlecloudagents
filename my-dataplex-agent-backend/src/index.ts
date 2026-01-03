@@ -69,10 +69,10 @@ async function startServer() {
             *   **Run**: gcloud dataplex datascans run my-scan-id --project=my-project-id --location=us-central1
             *   **Delete**: gcloud dataplex datascans delete my-scan-id --project=my-project-id --location=us-central1
             *   **Updating Rules**: To add, update, or remove rules, you MUST use the \`gcloud dataplex datascans update\` command. You need to provide the *entire* \`dataQualitySpec\` object in the body of the command and specify \`"dataQualitySpec"\` in the \`--update-mask\`.
-                *   **Example**: \`gcloud dataplex datascans update my-scan-id --project=my-project-id --location=us-central1 --update-mask="dataQualitySpec" --body='{"dataQualitySpec": {"rules": [{"column": "email", "dimension": "VALIDITY", "nonNullExpectation": {}}, {"column": "country", "dimension": "VALIDITY", "setExpectation": {"values": ["US", "GB", "CA"]}}]}}'\`
+                *   **Example**: \`gcloud dataplex datascans update my-scan-id --project=my-project-id --location=us-central1 --update-mask="dataQualitySpec" --body='{{"dataQualitySpec": {{"rules": [{{"column": "email", "dimension": "VALIDITY", "nonNullExpectation": {{}}}}, {{"column": "country", "dimension": "VALIDITY", "setExpectation": {{"values": ["US", "GB", "CA"]}}}}]}}}}'\`
 
         *   **Dataplex - Data Profiling Scans**
-            *   **Run**: \`gcloud dataplex datascans create --project=my-project-id --location=us-central1 --body='{ "data_profile_spec": {}, "data": { "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" } }'\`
+            *   **Run**: \`gcloud dataplex datascans create --project=my-project-id --location=us-central1 --body='{{ "data_profile_spec": {{}}, "data": {{ "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" }} }}'\`
 
 
         **UNDERSTANDING DATA QUALITY RULES**
@@ -81,14 +81,14 @@ async function startServer() {
 
         *   **Rule Structure Example**: A rule will look like this. You should be able to explain what each part means.
             \`\`\`json
-            {
+            {{
               "column": "city",
               "dimension": "VALIDITY",
               "ruleType": "SET_EXPECTATION",
-              "setExpectation": {
+              "setExpectation": {{
                 "values": ["New York", "London", "Tokyo"]
-              }
-            }
+              }}
+            }}
             \`\`\`
     `;
 
