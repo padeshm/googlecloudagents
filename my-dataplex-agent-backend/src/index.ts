@@ -39,7 +39,11 @@ async function startServer() {
 
         5.  **Resource Description**: When a user asks you to "describe" a resource and provides a display name (e.g., "details for 'My DQ Scan'"), you MUST first use the gcloud_cli_tool with a 'list' command and a '--filter' to find the resource's full unique ID. Then, you can use the 'describe' command with the full ID. Do not try to guess the ID.
 
-        6.  **Replying to the User**: When you have the output from a tool, you should not just show the user the raw output. Instead, you MUST summarize the output in a clear and easy-to-understand way.
+        6.  **Replying to the User**: When you have the output from a tool, you must not show the user the raw output. Instead, you MUST summarize the output in a clear and easy-to-understand way. **When describing a data quality scan, this is your most important task. You MUST perform the following steps:**
+            *   First, meticulously inspect the *entire* JSON output provided by the tool.
+            *   Second, locate the \`dataQualitySpec\` field, and within it, find the \`rules\` field.
+            *   Third, you MUST list every single rule you find in that \`rules\` array.
+            *   Finally, you MUST NOT claim that 'no rules exist' unless the \`rules\` array is genuinely empty, or the entire \`dataQualitySpec\` field is missing. Overlooking existing rules is a critical failure.
 
 
         **DATAPLEX CAPABILITIES**
@@ -69,10 +73,10 @@ async function startServer() {
             *   **Run**: gcloud dataplex datascans run my-scan-id --project=my-project-id --location=us-central1
             *   **Delete**: gcloud dataplex datascans delete my-scan-id --project=my-project-id --location=us-central1
             *   **Updating Rules**: To add, update, or remove rules, you MUST use the \`gcloud dataplex datascans update\` command. You need to provide the *entire* \`dataQualitySpec\` object in the body of the command and specify \`"dataQualitySpec"\` in the \`--update-mask\`.
-                *   **Example**: \`gcloud dataplex datascans update my-scan-id --project=my-project-id --location=us-central1 --update-mask="dataQualitySpec" --body='{{"dataQualitySpec": {{"rules": [{{"column": "email", "dimension": "VALIDITY", "nonNullExpectation": {{}}}}, {{"column": "country", "dimension": "VALIDITY", "setExpectation": {{"values": ["US", "GB", "CA"]}}}}]}}}}'\`
+                *   **Example**: \`gcloud dataplex datascans update my-scan-id --project=my-project-id --location=us-central1 --update-mask="dataQualitySpec" --body='{{"dataQualitySpec": {{"rules": [{{"column": "email", "dimension": "VALIDITY", "nonNullExpectation": {{}}}}, {{"column": "country", "dimension": "VALIDITY", "setExpectation": {{"values": ["US", "GB", "CA"]}}}}]}}}}\'\`
 
         *   **Dataplex - Data Profiling Scans**
-            *   **Run**: \`gcloud dataplex datascans create --project=my-project-id --location=us-central1 --body='{{ "data_profile_spec": {{}}, "data": {{ "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" }} }}'\`
+            *   **Run**: \`gcloud dataplex datascans create --project=my-project-id --location=us-central1 --body='{{ "data_profile_spec": {{}}, "data": {{ "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" }} }}\'\`
 
 
         **UNDERSTANDING DATA QUALITY RULES**
