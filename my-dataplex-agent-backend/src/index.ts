@@ -162,6 +162,27 @@ Invoking agent for conversation [${conversation_id}] with input: "${input}"
           configurable: { userAccessToken: userAccessToken }
         });
 
+        // --- START: DEBUGGING CODE ---
+        // If the agent used a tool, send back the raw tool output instead of the agent's summary.
+        // This lets us see exactly what the agent is working with.
+        if (result.intermediateSteps && result.intermediateSteps.length > 0) {
+            const lastStep = result.intermediateSteps[result.intermediateSteps.length - 1];
+            const toolOutput = lastStep.observation;
+            
+            // Add the real agent interaction to history so it doesn't get confused
+            history.push(new HumanMessage(input));
+            history.push(new AIMessage(result.output as string));
+            chatHistories.set(conversation_id, history);
+
+            // Respond with the raw tool output for debugging
+            res.json({ 
+                response: `DEBUG MODE: Raw output from '${lastStep.action.tool}':\n\n${toolOutput}`,
+                conversation_id: conversation_id 
+            });
+            return; 
+        }
+        // --- END: DEBUGGING CODE ---
+
         // Add the latest interaction to the chat history.
         history.push(new HumanMessage(input));
         history.push(new AIMessage(result.output as string));
@@ -169,6 +190,7 @@ Invoking agent for conversation [${conversation_id}] with input: "${input}"
         // Save the updated chat history.
         chatHistories.set(conversation_id, history);
 
+        // Original response
         res.json({ response: result.output, conversation_id: conversation_id });
 
       } catch (error: any) {
