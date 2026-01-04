@@ -39,6 +39,7 @@ async function startServer() {
 
         5.  **Resource Description**: When a user asks you to "describe" a resource and provides a display name (e.g., "details for 'My DQ Scan'"), you MUST first use the gcloud_cli_tool with a 'list' command and a '--filter' to find the resource's full unique ID. Then, you can use the 'describe' command with the full ID. Do not try to guess the ID.
 
+        /* --- START: TEMPORARILY COMMENTED OUT FOR DEBUGGING ---
         6.  **Replying to the User**: When you have the output from a tool, you must not show the user the raw output. Instead, you MUST summarize the output in a clear and easy-to-understand way. **When describing a data quality scan, this is your most important task. You MUST perform the following steps:**
             *   First, meticulously inspect the *entire* JSON output provided by the tool.
             *   Second, locate the \`dataQualitySpec\` field, and within it, find the \`rules\` field.
@@ -94,6 +95,19 @@ async function startServer() {
               }}
             }}
             \`\`\`
+        --- END: TEMPORARILY COMMENTED OUT FOR DEBUGGING --- */
+        
+        // --- START: NEW TEMPORARY PROMPT FOR DEBUGGING ---
+        // This is a more forceful instruction to ensure the agent correctly parses data quality rules.
+        **FINAL INSTRUCTION: RESPONSE GENERATION**
+
+        Your final response to the user MUST be a summary of the tool's output. However, if the tool you used was 'gcloud dataplex datascans describe', you MUST follow these steps meticulously:
+        1.  Inspect the entire JSON output from the tool.
+        2.  Locate the \`dataQualitySpec\` field.
+        3.  Inside it, locate the \`rules\` array.
+        4.  You MUST list every single rule from that array.
+        5.  It is a CRITICAL FAILURE to overlook these rules. DO NOT claim 'no rules exist' unless the \`rules\` array is genuinely empty or the \`dataQualitySpec\` field is missing.
+        // --- END: NEW TEMPORARY PROMPT FOR DEBUGGING ---
     `;
 
     const prompt = ChatPromptTemplate.fromMessages([
@@ -162,27 +176,6 @@ Invoking agent for conversation [${conversation_id}] with input: "${input}"
           configurable: { userAccessToken: userAccessToken }
         });
 
-        // --- START: DEBUGGING CODE ---
-        // If the agent used a tool, send back the raw tool output instead of the agent's summary.
-        // This lets us see exactly what the agent is working with.
-        if (result.intermediateSteps && result.intermediateSteps.length > 0) {
-            const lastStep = result.intermediateSteps[result.intermediateSteps.length - 1];
-            const toolOutput = lastStep.observation;
-            
-            // Add the real agent interaction to history so it doesn't get confused
-            history.push(new HumanMessage(input));
-            history.push(new AIMessage(result.output as string));
-            chatHistories.set(conversation_id, history);
-
-            // Respond with the raw tool output for debugging
-            res.json({ 
-                response: `DEBUG MODE: Raw output from '${lastStep.action.tool}':\n\n${toolOutput}`,
-                conversation_id: conversation_id 
-            });
-            return; 
-        }
-        // --- END: DEBUGGING CODE ---
-
         // Add the latest interaction to the chat history.
         history.push(new HumanMessage(input));
         history.push(new AIMessage(result.output as string));
@@ -190,7 +183,6 @@ Invoking agent for conversation [${conversation_id}] with input: "${input}"
         // Save the updated chat history.
         chatHistories.set(conversation_id, history);
 
-        // Original response
         res.json({ response: result.output, conversation_id: conversation_id });
 
       } catch (error: any) {
