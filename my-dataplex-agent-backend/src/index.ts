@@ -8,7 +8,7 @@ import {
   MessagesPlaceholder,
 } from "@langchain/core/prompts";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
-import { gcloudTool } from "./tools/gcloud-tool.js";
+import { googleCloudSdkTool } from "./tools/gcloud-tool.js";
 
 async function startServer() {
     const model = new ChatVertexAI({
@@ -17,7 +17,7 @@ async function startServer() {
       maxOutputTokens: 8192,
     });
 
-    const tools = [gcloudTool];
+    const tools = [googleCloudSdkTool];
 
     const systemPrompt = `
         You are a Google Cloud assistant who is an expert in Dataplex, BigQuery, and Cloud Storage.
@@ -37,7 +37,7 @@ async function startServer() {
 
         4.  **Contextual Awareness**: Before executing a new command, you MUST review the output from the previous command and the user's follow-up question to ensure you maintain context. Do not ask for information that has already been provided or established.
 
-        5.  **Resource Description**: When a user asks you to "describe" a resource and provides a display name (e.g., "details for 'My DQ Scan'"), you MUST first use the gcloud_cli_tool with a 'list' command and a '--filter' to find the resource's full unique ID. Then, you can use the 'describe' command with the full ID. Do not try to guess the ID.
+        5.  **Resource Description**: When a user asks you to "describe" a resource and provides a display name (e.g., "details for 'My DQ Scan'"), you MUST first use the google_cloud_sdk_tool with a 'list' command and a '--filter' to find the resource's full unique ID. Then, you can use the 'describe' command with the full ID. Do not try to guess the ID.
 
         6.  **Replying to the User**: When you have the output from a tool, you must not show the user the raw output. Instead, you MUST summarize the output in a clear and easy-to-understand way. **When describing a data quality scan, this is your most important task. You MUST perform the following steps:**
             *   First, meticulously inspect the *entire* JSON output provided by the tool.

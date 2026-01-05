@@ -1,35 +1,31 @@
-
 import { exec } from 'child_process';
 import { DynamicTool } from "@langchain/core/tools";
 import { RunnableConfig } from '@langchain/core/runnables';
-// This import is required to correctly type the function signature for the tool.
 import { CallbackManagerForToolRun } from "@langchain/core/callbacks/manager";
 
 /**
- * Executes a gcloud command using the end-user's access token.
- * The function signature now correctly matches the one expected by DynamicTool,
- * including the optional 'runManager' as the second argument.
+ * Executes a Google Cloud SDK command (gcloud, bq, gsutil) using the end-user's access token.
  */
-async function runGcloudCliCommand(
+async function runGoogleCloudSdkCommand(
   command: string,
-  // The runManager is passed by the agent but is not used in this tool.
-  // It is included here to ensure the function signature is correct.
   runManager?: CallbackManagerForToolRun,
-  // The config object, containing the access token, is now correctly the third parameter.
   config?: RunnableConfig
 ): Promise<string> {
-  console.log(`\n🤖 Tool received command: gcloud ${command}`);
+  // The tool now logs the full command as received.
+  console.log(`
+🤖 Tool received command: ${command}`);
 
   const userAccessToken = config?.configurable?.userAccessToken;
 
   if (!userAccessToken) {
-    const errorMsg = "Authentication Error: User access token was not found in the tool's config. This is required for gcloud commands.";
+    const errorMsg = "Authentication Error: User access token was not found in the tool's config. This is required for SDK commands.";
     console.error(errorMsg);
     return errorMsg;
   }
 
+  // The 'gcloud' prefix is removed. The command is now executed as-is.
   return new Promise((resolve) => {
-    exec(`gcloud ${command}`, {
+    exec(command, {
       env: {
         ...process.env,
         CLOUDSDK_AUTH_ACCESS_TOKEN: userAccessToken,
@@ -42,24 +38,27 @@ async function runGcloudCliCommand(
         return;
       }
       if (stderr && !stdout) {
-        const stderrMessage = `Command may have failed. Stderr: ${stderr}`;
+        const stderrMessage = `Command may have produced a warning or non-fatal error. Stderr: ${stderr}`;
         console.warn(stderrMessage);
         resolve(stderr.trim());
         return;
       }
-      console.log(`gcloud command successful, stdout:\n${stdout}`);
+      console.log(`Command successful, stdout:\n${stdout}`);
       resolve(stdout.trim());
     });
   });
 }
 
-export const gcloudTool = new DynamicTool({
-  name: "gcloud_cli_tool",
+export const googleCloudSdkTool = new DynamicTool({
+  // The tool has been renamed to be more generic.
+  name: "google_cloud_sdk_tool",
+  // The description now tells the agent it can handle gcloud, bq, and gsutil.
+  // It also instructs the agent to provide the *entire* command.
   description: `
-    Executes Google Cloud (gcloud) commands on behalf of the user.
-    The input MUST be a plain string containing the command to execute (without the 'gcloud' prefix).
-    Example: "dataplex datascans list --project=my-project-id"
+    Executes Google Cloud SDK commands (gcloud, bq, gsutil) on behalf of the user.
+    The input MUST be a plain string containing the full command to execute, including the tool name (e.g., 'gcloud', 'bq', 'gsutil').
+    Example: "gcloud dataplex datascans list --project=my-project-id"
+    Example: "bq show --schema --format=prettyjson my-project-id:my_dataset.my_table"
   `,
-  // The function now has the correct signature that DynamicTool expects.
-  func: runGcloudCliCommand,
+  func: runGoogleCloudSdkCommand,
 });
