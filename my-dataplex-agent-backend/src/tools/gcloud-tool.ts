@@ -12,7 +12,7 @@ async function runGoogleCloudSdkCommand(
   config?: RunnableConfig
 ): Promise<string> {
   console.log(`
-🤖 Tool received command: gcloud ${command}`);
+⚙️ Tool received command: ${command}`); // The command here should NOT include 'gcloud'
 
   const userAccessToken = config?.configurable?.userAccessToken;
 
@@ -22,21 +22,27 @@ async function runGoogleCloudSdkCommand(
     return errorMsg;
   }
 
+  // The tool transparently uses the 'gcloud' executable to run all commands,
+  // which ensures that 'bq' and 'gsutil' also use the provided access token.
+  const executionCommand = `gcloud ${command}`;
+
   return new Promise((resolve) => {
-    exec(`gcloud ${command}`, {
+    exec(executionCommand, {
       env: {
         ...process.env,
         CLOUDSDK_AUTH_ACCESS_TOKEN: userAccessToken,
+        CLOUDSDK_CORE_DISABLE_PROMPTS: "1", // Ensure no interactive prompts
       },
     }, (error, stdout, stderr) => {
       if (error) {
         const errorMessage = `Execution Error: ${error.message}\nStderr: ${stderr}`;
         console.error(errorMessage);
-        resolve(errorMessage);
+        resolve(errorMessage); // Resolve with error to let the agent handle it
         return;
       }
       if (stderr && !stdout) {
-        const stderrMessage = `Command may have produced a warning or non-fatal error. Stderr: ${stderr}`;
+        // Handle cases where there's only a warning or non-fatal error
+        const stderrMessage = `Command may have produced a warning or non-fatal error.\nStderr: ${stderr}`;
         console.warn(stderrMessage);
         resolve(stderr.trim());
         return;
@@ -53,8 +59,9 @@ export const googleCloudSdkTool = new DynamicTool({
     Executes Google Cloud SDK commands (gcloud, bq, gsutil) on behalf of the user.
     The input MUST be a plain string containing the command to execute, but WITHOUT the 'gcloud' prefix.
     The tool will automatically prepend 'gcloud' to the command.
-    Example for bq: "bq show --schema --format=prettyjson my-project-id:my_dataset.my_table"
     Example for gcloud: "dataplex datascans list --project=my-project-id"
+    Example for bq: "bq show --schema --format=prettyjson --project_id=my-project-id my_dataset.my_table"
+    Example for gsutil: "gsutil ls --project my-project-id"
   `,
   func: runGoogleCloudSdkCommand,
 });
