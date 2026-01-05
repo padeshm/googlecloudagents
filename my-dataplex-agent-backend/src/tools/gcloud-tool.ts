@@ -62,7 +62,7 @@ async function runGoogleCloudSdkCommand(
         const execError = `Execution Error (Exit Code ${code}):\n${error}`;
         resolve(execError);
       } else {
-        resolve(output.trim() || stderr.trim() || "Command executed successfully.");
+        resolve(output.trim() || error.trim() || "Command executed successfully.");
       }
     });
   });
