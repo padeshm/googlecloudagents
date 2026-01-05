@@ -39,7 +39,6 @@ async function startServer() {
 
         5.  **Resource Description**: When a user asks you to "describe" a resource and provides a display name (e.g., "details for 'My DQ Scan'"), you MUST first use the gcloud_cli_tool with a 'list' command and a '--filter' to find the resource's full unique ID. Then, you can use the 'describe' command with the full ID. Do not try to guess the ID.
 
-        /* --- START: TEMPORARILY COMMENTED OUT FOR DEBUGGING ---
         6.  **Replying to the User**: When you have the output from a tool, you must not show the user the raw output. Instead, you MUST summarize the output in a clear and easy-to-understand way. **When describing a data quality scan, this is your most important task. You MUST perform the following steps:**
             *   First, meticulously inspect the *entire* JSON output provided by the tool.
             *   Second, locate the \`dataQualitySpec\` field, and within it, find the \`rules\` field.
@@ -70,7 +69,7 @@ async function startServer() {
 
         *   **Dataplex - Data Quality Scans**
             *   **List**: gcloud dataplex datascans list --project=my-project-id --location=us-central1
-            *   **Describe**: gcloud dataplex datascans describe my-scan-id --project=my-project-id --location=us-central1
+            *   **Describe**: gcloud dataplex datascans describe my-scan-id --project=my-project-id --location=us-central1 --view=FULL
             *   **Run**: gcloud dataplex datascans run my-scan-id --project=my-project-id --location=us-central1
             *   **Delete**: gcloud dataplex datascans delete my-scan-id --project=my-project-id --location=us-central1
             *   **Updating Rules**: To add, update, or remove rules, you MUST use the \`gcloud dataplex datascans update\` command. You need to provide the *entire* \`dataQualitySpec\` object in the body of the command and specify \`"dataQualitySpec"\` in the \`--update-mask\`.
@@ -95,19 +94,6 @@ async function startServer() {
               }}
             }}
             \`\`\`
-        --- END: TEMPORARILY COMMENTED OUT FOR DEBUGGING --- */
-        
-        // --- START: NEW TEMPORARY PROMPT FOR DEBUGGING ---
-        // This is a more forceful instruction to ensure the agent correctly parses data quality rules.
-        **FINAL INSTRUCTION: RESPONSE GENERATION**
-
-        Your final response to the user MUST be a summary of the tool's output. However, if the tool you used was 'gcloud dataplex datascans describe', you MUST follow these steps meticulously:
-        1.  Inspect the entire JSON output from the tool.
-        2.  Locate the \`dataQualitySpec\` field.
-        3.  Inside it, locate the \`rules\` array.
-        4.  You MUST list every single rule from that array.
-        5.  It is a CRITICAL FAILURE to overlook these rules. DO NOT claim 'no rules exist' unless the \`rules\` array is genuinely empty or the \`dataQualitySpec\` field is missing.
-        // --- END: NEW TEMPORARY PROMPT FOR DEBUGGING ---
     `;
 
     const prompt = ChatPromptTemplate.fromMessages([
