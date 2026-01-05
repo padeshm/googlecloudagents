@@ -11,8 +11,6 @@ async function runGoogleCloudSdkCommand(
   runManager?: CallbackManagerForToolRun,
   config?: RunnableConfig
 ): Promise<string> {
-  console.log(`
-⚙️ Tool received command: ${command}`); // The command here should NOT include 'gcloud'
 
   const userAccessToken = config?.configurable?.userAccessToken;
 
@@ -26,6 +24,11 @@ async function runGoogleCloudSdkCommand(
   // which ensures that 'bq' and 'gsutil' also use the provided access token.
   const executionCommand = `gcloud ${command}`;
 
+  // --- CUSTOM LOGGING: Print the exact command being executed ---
+  console.log("\n===============================================================================");
+  console.log(`[GCLOUD-TOOL] Executing command:\n${executionCommand}`);
+  console.log("===============================================================================\n");
+
   return new Promise((resolve) => {
     exec(executionCommand, {
       env: {
@@ -36,18 +39,16 @@ async function runGoogleCloudSdkCommand(
     }, (error, stdout, stderr) => {
       if (error) {
         const errorMessage = `Execution Error: ${error.message}\nStderr: ${stderr}`;
-        console.error(errorMessage);
-        resolve(errorMessage); // Resolve with error to let the agent handle it
+        // Do not log the full error here, just resolve with it for the agent to summarize.
+        resolve(errorMessage);
         return;
       }
       if (stderr && !stdout) {
         // Handle cases where there's only a warning or non-fatal error
         const stderrMessage = `Command may have produced a warning or non-fatal error.\nStderr: ${stderr}`;
-        console.warn(stderrMessage);
         resolve(stderr.trim());
         return;
       }
-      console.log(`Command successful, stdout:\n${stdout}`);
       resolve(stdout.trim());
     });
   });

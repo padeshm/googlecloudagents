@@ -118,7 +118,7 @@ async function startServer() {
     const agentExecutor = new AgentExecutor({
       agent,
       tools,
-      verbose: true,
+      verbose: false,
     });
 
     // A map to store chat histories, with conversation_id as the key.
@@ -152,12 +152,6 @@ async function startServer() {
         // Retrieve the chat history for this conversation, or create a new one.
         const history = chatHistories.get(conversation_id) || [];
         
-        console.log(`
----
-Invoking agent for conversation [${conversation_id}] with input: "${input}"
----
-`);
-
         // --- 2. Invoke Agent with User Token ---
         // Pass the token to the agent executor via the 'configurable' property.
         // This makes it available to all tools in the agent.
