@@ -1,11 +1,8 @@
-import { exec } from 'child_process';
+import { spawn } from 'child_process';
 import { DynamicTool } from "@langchain/core/tools";
 import { RunnableConfig } from '@langchain/core/runnables';
 import { CallbackManagerForToolRun } from "@langchain/core/callbacks/manager";
 
-/**
- * Executes a Google Cloud SDK command (gcloud, bq, gsutil) using the end-user's access token.
- */
 async function runGoogleCloudSdkCommand(
   command: string,
   runManager?: CallbackManagerForToolRun,
@@ -13,43 +10,60 @@ async function runGoogleCloudSdkCommand(
 ): Promise<string> {
 
   const userAccessToken = config?.configurable?.userAccessToken;
-
   if (!userAccessToken) {
-    const errorMsg = "Authentication Error: User access token was not found in the tool's config. This is required for SDK commands.";
+    const errorMsg = "Authentication Error: User access token was not found.";
     console.error(errorMsg);
     return errorMsg;
   }
 
-  // The tool transparently uses the 'gcloud' executable to run all commands,
-  // which ensures that 'bq' and 'gsutil' also use the provided access token.
-  const executionCommand = `gcloud ${command}`;
+  const commandParts = command.trim().split(' ');
+  let executable: string;
+  let args: string[];
 
-  // --- CUSTOM LOGGING: Print the exact command being executed ---
+  // INTELLIGENT EXECUTION LOGIC:
+  // Determine the correct executable based on the command passed by the agent.
+  if (commandParts[0] === 'bq' || commandParts[0] === 'gsutil') {
+    executable = commandParts[0];
+    args = commandParts.slice(1);
+  } else {
+    // Default to gcloud for all other commands (e.g., dataplex, storage).
+    executable = 'gcloud';
+    args = commandParts;
+  }
+
+  const fullCommandString = `${executable} ${args.join(' ')}`;
   console.log("\n===============================================================================");
-  console.log(`[GCLOUD-TOOL] Executing command:\n${executionCommand}`);
+  console.log(`[SDK-TOOL] Executing command:\n${fullCommandString}`);
   console.log("===============================================================================\n");
 
   return new Promise((resolve) => {
-    exec(executionCommand, {
+    const child = spawn(executable, args, {
       env: {
         ...process.env,
         CLOUDSDK_AUTH_ACCESS_TOKEN: userAccessToken,
-        CLOUDSDK_CORE_DISABLE_PROMPTS: "1", // Ensure no interactive prompts
+        CLOUDSDK_CORE_DISABLE_PROMPTS: "1",
       },
-    }, (error, stdout, stderr) => {
-      if (error) {
-        const errorMessage = `Execution Error: ${error.message}\nStderr: ${stderr}`;
-        // Do not log the full error here, just resolve with it for the agent to summarize.
-        resolve(errorMessage);
-        return;
+      shell: false
+    });
+
+    let output = "";
+    let error = "";
+    child.stdout.on("data", (data) => (output += data.toString()));
+    child.stderr.on("data", (data) => (error += data.toString()));
+
+    child.on("error", (err) => {
+      const spawnError = `System Error: Failed to start the command '${executable}'. Error: ${err.message}`;
+      console.error(spawnError);
+      resolve(spawnError);
+    });
+
+    child.on("close", (code) => {
+      if (code !== 0) {
+        const execError = `Execution Error (Exit Code ${code}):\n${error}`;
+        resolve(execError);
+      } else {
+        resolve(output.trim() || stderr.trim() || "Command executed successfully.");
       }
-      if (stderr && !stdout) {
-        // Handle cases where there's only a warning or non-fatal error
-        const stderrMessage = `Command may have produced a warning or non-fatal error.\nStderr: ${stderr}`;
-        resolve(stderr.trim());
-        return;
-      }
-      resolve(stdout.trim());
     });
   });
 }
@@ -57,12 +71,12 @@ async function runGoogleCloudSdkCommand(
 export const googleCloudSdkTool = new DynamicTool({
   name: "google_cloud_sdk_tool",
   description: `
-    Executes Google Cloud SDK commands (gcloud, bq, gsutil) on behalf of the user.
-    The input MUST be a plain string containing the command to execute, but WITHOUT the 'gcloud' prefix.
-    The tool will automatically prepend 'gcloud' to the command.
-    Example for gcloud: "dataplex datascans list --project=my-project-id"
-    Example for bq: "bq show --schema --format=prettyjson --project_id=my-project-id my_dataset.my_table"
-    Example for gsutil: "gsutil ls --project my-project-id"
+    Executes Google Cloud SDK commands for gcloud, bq, and gsutil.
+    - For \`bq\` and \`gsutil\` commands, the input string MUST start with 'bq' or 'gsutil'. The tool will execute these commands directly.
+        Example for bq: "bq show --schema --project_id=my-project-id my_dataset.my_table"
+        Example for gsutil: "gsutil ls gs://my-bucket-name"
+    - For \`gcloud\` commands (e.g., dataplex, compute, storage), the input string should be the command WITHOUT the 'gcloud' prefix.
+        Example for gcloud: "dataplex datascans list --project=my-project-id"
   `,
   func: runGoogleCloudSdkCommand,
 });

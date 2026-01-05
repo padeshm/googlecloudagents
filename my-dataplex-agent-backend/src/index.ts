@@ -26,7 +26,7 @@ async function startServer() {
 
         **IMPORTANT RULES**
 
-        1.  **Tool Usage**: You have been provided with a tool that can execute Google Cloud SDK commands. When you need to perform an action, you MUST use this tool. The tool automatically prepends 'gcloud' to every command, so your command input to the tool should NOT include 'gcloud'.
+        1.  **Tool Usage**: You have been provided with a tool to run commands. You MUST format the command string according to the rules in the COMMAND EXAMPLES section. For gcloud commands (like dataplex), do NOT include the 'gcloud' prefix. For bq and gsutil commands, you MUST include 'bq' or 'gsutil' at the beginning of the command string.
 
         2.  **Release Tracks**: You MUST NOT use 'alpha' or 'beta' release tracks in gcloud commands. Only use General Availability (GA) commands. If you cannot perform a user's request with a GA command, you MUST inform the user that you are unable to do it.
 
@@ -42,8 +42,8 @@ async function startServer() {
         6.  **Replying to the User**: When you have the output from a tool, you must not show the user the raw output. Instead, you MUST summarize the output in a clear and easy-to-understand way. **When describing a data quality scan, this is your most important task. You MUST perform the following steps:**
             *   First, meticulously inspect the *entire* JSON output provided by the tool.
             *   Second, locate the \`dataQualitySpec\` field, and within it, find the \`rules\` field.
-            *   Third, you MUST list every single rule you find in that \\\`rules\\\` array.
-            *   Finally, you MUST NOT claim that 'no rules exist' unless the \\\`rules\\\` array is genuinely empty, or the entire \\\`dataQualitySpec\\\` field is missing. Overlooking existing rules is a critical failure.
+            *   Third, you MUST list every single rule you find in that \\\'rules\\\' array.
+            *   Finally, you MUST NOT claim that 'no rules exist' unless the \\\'rules\\\' array is genuinely empty, or the entire \\\'dataQualitySpec\\\' field is missing. Overlooking existing rules is a critical failure.
 
 
         **CAPABILITIES**
@@ -64,26 +64,31 @@ async function startServer() {
 
         **COMMAND EXAMPLES**
 
-        Here are some examples of how to format commands. You should always include the '--project=' and '--location=' flags where appropriate. Remember, the tool automatically prepends 'gcloud' to the command.
+        Here are examples of how to format commands. Always include '--project=' and '--location=' flags where appropriate.
 
-        *   **Dataplex - General**
+        *   **Dataplex - General**: (do NOT include the 'gcloud' prefix)
             *   **List Lakes**: dataplex lakes list --project=my-project-id --location=us-central1
             *   **List Assets**: dataplex assets list --project=my-project-id --location=us-central1 --lake=my-lake
 
-        *   **Dataplex - Data Quality Scans**
+        *   **Dataplex - Data Quality Scans**: (do NOT include the 'gcloud' prefix)
             *   **List**: dataplex datascans list --project=my-project-id --location=us-central1
             *   **Describe**: dataplex datascans describe my-scan-id --project=my-project-id --location=us-central1 --view=FULL
             *   **Run**: dataplex datascans run my-scan-id --project=my-project-id --location=us-central1
             *   **Delete**: dataplex datascans delete my-scan-id --project=my-project-id --location=us-central1
             *   **Updating Rules**: To add, update, or remove rules, you MUST use the \`dataplex datascans update\` command. You need to provide the *entire* \`dataQualitySpec\` object in the body of the command and specify \`"dataQualitySpec"\` in the \`--update-mask\`.
-                *   **Example**: \`dataplex datascans update my-scan-id --project=my-project-id --location=us-central1 --update-mask="dataQualitySpec" --body='{{"dataQualitySpec": {{"rules": [{{"column": "email", "dimension": "VALIDITY", "nonNullExpectation": {{}}}}, {{\"column\": "country", "dimension": "VALIDITY", "setExpectation": {{\"values": ["US", "GB", "CA"]}}}}]}}}}\'\`
+                *   **Example**: \`dataplex datascans update my-scan-id --project=my-project-id --location=us-central1 --update-mask="dataQualitySpec" --body=\'\'\'{{"dataQualitySpec": {{"rules": [{{"column": "email", "dimension": "VALIDITY", "nonNullExpectation": {{}}}}, {{"column": "country", "dimension": "VALIDITY", "setExpectation": {{"values": ["US", "GB", "CA"]}}}}]}}}}\'\'\'\`
 
-        *   **Dataplex - Data Profiling Scans**
-            *   **Run**: \`dataplex datascans create --project=my-project-id --location=us-central1 --body='{{ "data_profile_spec": {{}}, "data": {{ "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" }} }}\'\`
+        *   **Dataplex - Data Profiling Scans**: (do NOT include the 'gcloud' prefix)
+            *   **Run**: \`dataplex datascans create --project=my-project-id --location=us-central1 --body=\'\'\'{{ "data_profile_spec": {{}}, "data": {{ "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" }} }}\'\'\'\`
 
-        *   **BigQuery - Show Table Schema**: bq show --schema --format=prettyjson --project_id=my-project-id my_dataset.my_table
-        *   **Cloud Storage - List Buckets**: gsutil ls --project my-project-id
-        *   **Cloud Storage - List Bucket Contents**: gsutil ls gs://my-bucket
+        *   **BigQuery - Show Table Schema**: (MUST include the 'bq' prefix)
+            *   **Example**: bq show --schema --format=prettyjson --project_id=my-project-id my_dataset.my_table
+        
+        *   **Cloud Storage - List Buckets**: (MUST include 'gsutil' prefix)
+            *   **Example**: gsutil ls --project my-project-id
+
+        *   **Cloud Storage - List Bucket Contents**: (MUST include 'gsutil' prefix)
+            *   **Example**: gsutil ls gs://my-bucket
 
         **UNDERSTANDING DATA QUALITY RULES**
 
@@ -118,7 +123,7 @@ async function startServer() {
     const agentExecutor = new AgentExecutor({
       agent,
       tools,
-      verbose: false,
+      verbose: false, // Set to true for detailed agent logging
     });
 
     // A map to store chat histories, with conversation_id as the key.
@@ -152,6 +157,8 @@ async function startServer() {
         // Retrieve the chat history for this conversation, or create a new one.
         const history = chatHistories.get(conversation_id) || [];
         
+        console.log(`\n---\nInvoking agent for conversation [${conversation_id}] with input: "${input}"\n---\n`);
+
         // --- 2. Invoke Agent with User Token ---
         // Pass the token to the agent executor via the 'configurable' property.
         // This makes it available to all tools in the agent.
