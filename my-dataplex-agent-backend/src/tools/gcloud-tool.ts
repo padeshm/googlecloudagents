@@ -11,9 +11,8 @@ async function runGoogleCloudSdkCommand(
   runManager?: CallbackManagerForToolRun,
   config?: RunnableConfig
 ): Promise<string> {
-  // The tool now logs the full command as received.
   console.log(`
-🤖 Tool received command: ${command}`);
+🤖 Tool received command: gcloud ${command}`);
 
   const userAccessToken = config?.configurable?.userAccessToken;
 
@@ -23,9 +22,8 @@ async function runGoogleCloudSdkCommand(
     return errorMsg;
   }
 
-  // The 'gcloud' prefix is removed. The command is now executed as-is.
   return new Promise((resolve) => {
-    exec(command, {
+    exec(`gcloud ${command}`, {
       env: {
         ...process.env,
         CLOUDSDK_AUTH_ACCESS_TOKEN: userAccessToken,
@@ -50,15 +48,13 @@ async function runGoogleCloudSdkCommand(
 }
 
 export const googleCloudSdkTool = new DynamicTool({
-  // The tool has been renamed to be more generic.
   name: "google_cloud_sdk_tool",
-  // The description now tells the agent it can handle gcloud, bq, and gsutil.
-  // It also instructs the agent to provide the *entire* command.
   description: `
     Executes Google Cloud SDK commands (gcloud, bq, gsutil) on behalf of the user.
-    The input MUST be a plain string containing the full command to execute, including the tool name (e.g., 'gcloud', 'bq', 'gsutil').
-    Example: "gcloud dataplex datascans list --project=my-project-id"
-    Example: "bq show --schema --format=prettyjson my-project-id:my_dataset.my_table"
+    The input MUST be a plain string containing the command to execute, but WITHOUT the 'gcloud' prefix.
+    The tool will automatically prepend 'gcloud' to the command.
+    Example for bq: "bq show --schema --format=prettyjson my-project-id:my_dataset.my_table"
+    Example for gcloud: "dataplex datascans list --project=my-project-id"
   `,
   func: runGoogleCloudSdkCommand,
 });
