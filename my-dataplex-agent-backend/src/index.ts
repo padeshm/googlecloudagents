@@ -81,7 +81,7 @@ async function startServer() {
         *   **Dataplex - Data Profiling Scans**
             *   **Run**: \`dataplex datascans create --project=my-project-id --location=us-central1 --body='{{ "data_profile_spec": {{}}, "data": {{ "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" }} }}\'\`
 
-        *   **BigQuery - Show Table Schema**: bq show --schema --format=prettyjson my-project-id:my_dataset.my_table
+        *   **BigQuery - Show Table Schema**: bq show --schema --format=prettyjson --project_id=my-project-id my_dataset.my_table
         *   **Cloud Storage - List Buckets**: gsutil ls --project my-project-id
         *   **Cloud Storage - List Bucket Contents**: gsutil ls gs://my-bucket
 
