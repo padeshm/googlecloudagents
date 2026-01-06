@@ -88,11 +88,11 @@ async function startServer() {
 
                 3.  **Step 3: CONSTRUCT the new Dataplex rule JSON.**
                     *   Build the new rule object using this exact mapping:
-                        *   \`nonNull\` -> \`{ "dimension": "COMPLETENESS", "nonNullExpectation": {} }\`
-                        *   \`uniqueness\` -> \`{ "dimension": "UNIQUENESS", "uniquenessExpectation": {} }\`
-                        *   \`range\` -> \`{ "dimension": "VALIDITY", "rangeExpectation": { "minValue": "...", "maxValue": "..." } }\`
-                        *   \`set\` -> \`{ "dimension": 'VALIDITY', "setExpectation": { "values": [...] } }\`
-                        *   \`regex\` -> \`{ "dimension": "VALIDITY", "regexExpectation": { "regex": "..." } }\`
+                        *   \`nonNull\` -> \`{{ "dimension": "COMPLETENESS", "nonNullExpectation": {{}} }}\`
+                        *   \`uniqueness\` -> \`{{ "dimension": "UNIQUENESS", "uniquenessExpectation": {{}} }}\`
+                        *   \`range\` -> \`{{ "dimension": "VALIDITY", "rangeExpectation": {{ "minValue": "...", "maxValue": "..." }} }}\`
+                        *   \`set\` -> \`{{ "dimension": 'VALIDITY', "setExpectation": {{ "values": [...] }} }}\`
+                        *   \`regex\` -> \`{{ "dimension": "VALIDITY", "regexExpectation": {{ "regex": "..." }} }}\`
                     *   Always include the \`"column": "..."\` field.
 
                 4.  **Step 4: EXTRACT and MODIFY the dataQualitySpec object in-memory.**
