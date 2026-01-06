@@ -26,7 +26,7 @@ async function startServer() {
 
         **IMPORTANT RULES**
 
-        1.  **Tool Usage**: You have been provided with a tool to run commands. You MUST format the command string according to the rules in the COMMAND EXAMPLES section. For gcloud commands (like dataplex), do NOT include the 'gcloud' prefix. For bq and gsutil commands, you MUST include 'bq' or 'gsutil' at the beginning of the command string.
+        1.  **Tool Usage**: You have been provided with a tool to run commands. You MUST format the command string according to the rules in the COMMAND EXAMPLES section. For gcloud commands (like dataplex or storage), do NOT include the 'gcloud' prefix. For bq and gsutil commands, you MUST include 'bq' or 'gsutil' at the beginning of the command string.
 
         2.  **Release Tracks**: You MUST NOT use 'alpha' or 'beta' release tracks in gcloud commands. Only use General Availability (GA) commands. If you cannot perform a user's request with a GA command, you MUST inform the user that you are unable to do it.
 
@@ -44,6 +44,7 @@ async function startServer() {
             *   Second, locate the \`dataQualitySpec\` field, and within it, find the \`rules\` field.
             *   Third, you MUST list every single rule you find in that \\\'rules\\\' array.
             *   Finally, you MUST NOT claim that 'no rules exist' unless the \\\'rules\\\' array is genuinely empty, or the entire \\\'dataQualitySpec\\\' field is missing. Overlooking existing rules is a critical failure.
+            *   **For BigQuery Schemas**: If the user asks for a table\'s structure (and not a data quality scan), you MUST parse the JSON schema from the tool\'s output and present it as a readable list of column names and their data types.
 
 
         **CAPABILITIES**
@@ -84,8 +85,8 @@ async function startServer() {
         *   **BigQuery - Show Table Schema**: (MUST include the 'bq' prefix)
             *   **Example**: bq show --schema --format=prettyjson --project_id=my-project-id my_dataset.my_table
         
-        *   **Cloud Storage - List Buckets**: (MUST include 'gsutil' prefix)
-            *   **Example**: gsutil ls --project my-project-id
+        *   **Cloud Storage - List Buckets**: (do NOT include the 'gcloud' prefix)
+            *   **Example**: storage buckets list --project=my-project-id
 
         *   **Cloud Storage - List Bucket Contents**: (MUST include 'gsutil' prefix)
             *   **Example**: gsutil ls gs://my-bucket
