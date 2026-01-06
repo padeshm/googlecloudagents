@@ -76,40 +76,36 @@ async function startServer() {
             *   **Describe**: dataplex datascans describe my-scan-id --project=my-project-id --location=us-central1 --view=FULL
             *   **Run**: dataplex datascans run my-scan-id --project=my-project-id --location=us-central1
             *   **Delete**: dataplex datascans delete my-scan-id --project=my-project-id --location=us-central1
-            *   **Updating Data Quality Rules (CRITICAL FILE-BASED WORKFLOW)**: To add, update, or remove a rule, you MUST use a temporary file. This is a complex, multi-step process.
+            *   **Updating Data Quality Rules (CRITICAL FILE-BASED WORKFLOW)**: To add, update, or remove a rule, you MUST follow this exact multi-step, multi-tool process. You MUST NOT try to update the scan in a single step by passing JSON content directly to the update command.
 
-                1.  **Step 1: DESCRIBE the existing scan.**
-                    *   Use the tool to execute \`dataplex datascans describe <scan-id> --project=<project-id> --location=<location> --view=FULL\`. This provides the full JSON definition of the entire scan resource.
+                1.  **Step 1 (Tool: run_terminal_command): Get the latest scan definition.**
+                    *   Execute \`dataplex datascans describe <scan-id> --project=<project-id> --location=<location> --view=FULL\`. This provides the full JSON definition of the scan.
 
-                2.  **Step 2: MENTALLY PARSE the user\'s request.**
-                    *   From the user\'s prompt (e.g., "add a uniqueness rule on the \'sku\' column"), extract the structured intent: the column, the rule type, and any parameters.
-                    *   Valid rule types and parameters are: \`nonNull\`, \`uniqueness\`, \`range\` (\`minValue\`, \`maxValue\`), \`set\` (\`values\`), \`regex\` (\`regex\`).
-                    *   If information is missing, you MUST ask the user for it.
-
-                3.  **Step 3: CONSTRUCT the new Dataplex rule JSON.**
-                    *   Build the new rule object using this exact mapping:
+                2.  **Step 2 (IN-MEMORY): Understand the user's request and build the new rule.**
+                    *   **Parse the request**: From the user's prompt (e.g., "add a uniqueness rule on the 'sku' column"), extract the structured intent: the column, the rule type, and any parameters.
+                    *   **Construct the JSON**: Build the new rule's JSON object using the exact mapping below. This is how you translate the user's request into a valid Dataplex rule.
                         *   \`nonNull\` -> \`{{ "dimension": "COMPLETENESS", "nonNullExpectation": {{}} }}\`
                         *   \`uniqueness\` -> \`{{ "dimension": "UNIQUENESS", "uniquenessExpectation": {{}} }}\`
                         *   \`range\` -> \`{{ "dimension": "VALIDITY", "rangeExpectation": {{ "minValue": "...", "maxValue": "..." }} }}\`
                         *   \`set\` -> \`{{ "dimension": 'VALIDITY', "setExpectation": {{ "values": [...] }} }}\`
                         *   \`regex\` -> \`{{ "dimension": "VALIDITY", "regexExpectation": {{ "regex": "..." }} }}\`
-                    *   Always include the \`"column": "..."\` field.
+                    *   Always include the \`"column": "..."\` field in the new rule.
 
-                4.  **Step 4: EXTRACT and MODIFY the dataQualitySpec object in-memory.**
-                    *   Take the full JSON object from the \`describe\` command.
-                    *   Extract the \`dataQualitySpec\` object from it (i.e., \`fullScanObject.dataQualitySpec\`).
-                    *   Modify the \`rules\` array within this extracted \`dataQualitySpec\` object by adding, updating, or removing the rule as requested.
+                3.  **Step 3 (IN-MEMORY): Prepare the updated \`dataQualitySpec\`.**
+                    *   Take the full JSON object from Step 1.
+                    *   Extract the \`dataQualitySpec\` object. **If \`dataQualitySpec\` or its \`rules\` array does not exist, create them as empty JSON objects/arrays.**
+                    *   Modify the \`rules\` array within this object by adding your newly constructed rule from Step 2.
 
-                5.  **Step 5: WRITE the dataQualitySpec object to a temporary file.**
-                    *   Take the isolated, modified \`dataQualitySpec\` object from Step 4.
-                    *   Use the \`write_file\` tool to save the stringified version of only this object to a temporary file. For example: \`write_file(path='/tmp/updated_spec.json', content='<stringified-dataQualitySpec-object>')\`.
+                4.  **Step 4 (Tool: write_file): Save the complete, modified \`dataQualitySpec\` to a temporary file.**
+                    *   The content written to the file MUST be the full \`dataQualitySpec\` object (including any existing rules plus the new one).
+                    *   Example: \`write_file(path='/tmp/updated_spec.json', content='<stringified-dataQualitySpec-object>')\`.
 
-                6.  **Step 6: CONSTRUCT and EXECUTE the file-based update command.**
-                    *   Construct the final command using the correct \`--data-quality-spec-file\` flag pointing to the temporary file: \`dataplex datascans update <scan-id> --project=<project-id> --location=<location> --data-quality-spec-file=/tmp/updated_spec.json\`.
-                    *   Call the \`run_terminal_command\` tool with this final command.
+                5.  **Step 5 (Tool: run_terminal_command): Execute the update using the file.**
+                    *   The command MUST use the \`--data-quality-spec-file\` flag pointing to the file path from Step 4.
+                    *   Example: \`dataplex datascans update <scan-id> --project=<project-id> --location=<location> --data-quality-spec-file=/tmp/updated_spec.json\`.
 
-                7.  **Step 7: CLEAN UP the temporary file.**
-                    *   After the update command completes (whether it succeeds or fails), you MUST use the \`delete_file\` tool to delete the temporary file, for example: \`delete_file(path='/tmp/updated_spec.json')\`.
+                6.  **Step 6 (Tool: delete_file): Clean up the temporary file.**
+                    *   After the update completes, you MUST delete the temporary file. For example: \`delete_file(path='/tmp/updated_spec.json')\`.
 
         *   **Dataplex - Data Profiling Scans**: (do NOT include the 'gcloud' prefix)
             *   **Run**: \`dataplex datascans create --project=my-project-id --location=us-central1 --body=\'\'\'{{ "data_profile_spec": {{}}, "data": {{ "resource": "//bigquery.googleapis.com/projects/my-project-id/datasets/my-dataset/tables/my-table" }} }}\'\'\'\`
