@@ -53,15 +53,27 @@ app.post("/api/gcloud", async (req, res) => {
         return res.status(400).json({ response: 'Prompt not provided in the request body' });
     }
 
+    // Create a modified history for the AI that includes raw command output
+    const historyForAi = history.map((msg: any) => {
+        if (msg.type === 'bot' && msg.rawOutput) {
+            return {
+                role: 'model',
+                parts: [{
+                    text: `Command \`${msg.executedCommand}\` was executed.\nRAW_OUTPUT:\n\`\`\`\n${msg.rawOutput}\n\`\`\`\nSUMMARY_FOR_USER:\n${msg.content}`
+                }]
+            };
+        }
+        return {
+            role: msg.type === 'user' ? 'user' : 'model',
+            parts: [{ text: msg.content }]
+        };
+    }).filter((msg: any) => msg.parts[0].text && msg.role);
+
+
     let tool: string;
     let command: string;
     try {
-        const transformedHistory = history.map((msg: any) => ({
-            role: msg.type === 'user' ? 'user' : 'model',
-            parts: [{ text: msg.content }]
-        })).filter((msg: any) => msg.parts[0].text && msg.role);
-
-        const chat = generativeModel.startChat({ history: transformedHistory as Content[] });
+        const chat = generativeModel.startChat({ history: historyForAi as Content[] });
         const result = await chat.sendMessage(userPrompt);
         const rawResponseText = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
 
@@ -161,13 +173,22 @@ app.post("/api/gcloud", async (req, res) => {
                 model: model,
                 systemInstruction: { role: 'system', parts: [{ text: `You are a helpful Google Cloud assistant. Your goal is to summarize the output of a command in a clear, conversational way. CRITICAL RULES: 1. Directly answer the user\'s original request: '${userPrompt}'. 2. If the output is JSON metadata, find the specific field that answers the question (e.g., \`numRows\`) and present it clearly. 3. If the command was \`gcloud container clusters get-credentials\` and was successful, your summary MUST be: "Okay, I\'ve now configured access to that cluster. Please ask me again to perform your desired action, and I\'ll be able to do it.". 4. If the command output is a URL starting with 'https://storage.googleapis.com/', present it as a download link. Your response should be something like: "Of course. You can download the file using this secure, temporary link: [URL]". Do not add any other text or summary.` }] }
             });
-            const chat = summarizerModel.startChat({ history: history.map((msg: any) => ({ role: msg.type === 'user' ? 'user' : 'model', parts: [{ text: msg.content }] })).filter((msg: any) => msg.parts[0].text && msg.role) as Content[] });
-            const result = await chat.sendMessage(`Here is the command output:\n\n${output}`);
+            const result = await summarizerModel.generateContent(`Here is the command output:\n\n${output}`);
             const summary = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-            res.json({ response: summary || output });
+            
+            // Return the raw output along with the summary
+            res.json({ 
+                response: summary || output,
+                rawOutput: output,
+                executedCommand: `${tool} ${command}`
+            });
         } catch (summarizationError: any) {
             console.error("[Vertex AI] Error during summarization:", summarizationError);
-            res.status(500).json({ response: `I was able to run the command, but had trouble summarizing the results. Here is the raw output:\n\n> Executed: ${tool} ${command}\n\n${output}` });
+             res.json({
+                response: `I was able to run the command, but had trouble summarizing the results. Here is the raw output:\n\n> Executed: ${tool} ${command}\n\n${output}`,
+                rawOutput: output,
+                executedCommand: `${tool} ${command}`
+            });
         }
     });
 });
