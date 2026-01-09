@@ -54,7 +54,7 @@ class GoogleCloudSDK extends Tool {
         return `Error: Invalid tool '${tool}'. The first word of the command must be one of gcloud, gsutil, kubectl, or bq.`;
       }
 
-      const accessToken = config?.configurable?.accessToken;
+      const userAccessToken = config?.configurable?.userAccessToken;
       const accessControlResult = accessControl.check(args.join(' '));
       if (accessControlResult.permitted === false) {
         return accessControlResult.message;
@@ -75,8 +75,8 @@ class GoogleCloudSDK extends Tool {
         let stdout = '';
         let stderr = '';
         const env = { ...process.env };
-        if (accessToken) {
-            env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = accessToken;
+        if (userAccessToken) {
+            env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
         }
         const child = child_process.spawn(command.tool, command.args, {
           env,
@@ -92,7 +92,11 @@ class GoogleCloudSDK extends Tool {
     
         child.on('close', (code) => {
           if (code === 0) {
-            resolve(stdout);
+            if (stdout.trim() === '') {
+                resolve("Command executed successfully and returned no output.");
+            } else {
+                resolve(stdout);
+            }
           } else {
             resolve(stderr);
           }

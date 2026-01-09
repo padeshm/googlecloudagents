@@ -79,7 +79,7 @@ async function startServer() {
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return res.status(401).json({ response: 'Authorization (Access Token) not provided or invalid' });
         }
-        const accessToken = authHeader.split(' ')[1];
+        const userAccessToken = authHeader.split(' ')[1];
 
         const { prompt: userPrompt, history = [] } = req.body;
         if (!userPrompt) {
@@ -98,7 +98,7 @@ async function startServer() {
                     ) as BaseMessage[],
                 },
                 // This passes the access token securely to the gcloud_tool
-                { configurable: { accessToken } }
+                { configurable: { userAccessToken } }
             );
 
             res.json({ response: result.output });
