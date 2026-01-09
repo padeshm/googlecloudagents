@@ -14,8 +14,7 @@
  * limitations under the License.
  */
 
-import { StructuredTool } from "@langchain/core/tools";
-import { z } from "zod";
+import { Tool } from "@langchain/core/tools";
 import * as child_process from 'child_process';
 import {
   AccessControlList,
@@ -24,6 +23,7 @@ import {
 import * as gcloud from '../gcloud';
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { CallbackManagerForToolRun } from "@langchain/core/callbacks/manager";
+
 
 // Denylist any command that is interactive or requires a TTY.
 // These commands will hang the process.
@@ -36,20 +36,24 @@ const defaultDeny = [
 
 const accessControl = createAccessControlList([], defaultDeny);
 
-class GoogleCloudSDK extends StructuredTool {
+class GoogleCloudSDK extends Tool {
     name = 'google-cloud-sdk';
-    description = `Executes a command for a Google Cloud command-line interface: gcloud, gsutil, kubectl, or bq.`
-
-    schema = z.object({
-        tool: z.enum(["gcloud", "gsutil", "kubectl", "bq"]).describe("The command-line tool to execute."),
-        args: z.array(z.string()).describe("The arguments for the command."),
-    });
+    description = `Executes a command for a Google Cloud command-line interface: gcloud, gsutil, kubectl, or bq. Input should be the full command string.`;
 
     async _call(
-      { tool, args }: z.infer<this["schema"]>,
+      commandString: string,
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
+
+      const allArgs = commandString.trim().split(' ');
+      const tool = allArgs[0];
+      const args = allArgs.slice(1);
+
+      if (!["gcloud", "gsutil", "kubectl", "bq"].includes(tool)) {
+        return `Error: Invalid tool '${tool}'. The first word of the command must be one of gcloud, gsutil, kubectl, or bq.`;
+      }
+
       const accessToken = config?.configurable?.accessToken;
       const accessControlResult = accessControl.check(args.join(' '));
       if (accessControlResult.permitted === false) {
