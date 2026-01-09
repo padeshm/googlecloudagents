@@ -21,8 +21,6 @@ const model = new ChatVertexAI({
 const tools = [googleCloudSdkTool];
 
 // --- 2. Create the Agent Prompt ---
-// The prompt must include placeholders for the tools and tool names, which are
-// automatically populated by the createReactAgent function.
 const prompt = ChatPromptTemplate.fromMessages([
     [
         'system',
@@ -46,8 +44,9 @@ Thought: I now know the final answer
 Final Answer: the final answer to the original input question`,
     ],
     new MessagesPlaceholder({ variableName: 'chat_history', optional: true }),
-    ['human', '{input}'],
-    new MessagesPlaceholder('agent_scratchpad'),
+    // The human input now includes the agent_scratchpad placeholder. This is the
+    // correct format for the ReAct agent, which expects the scratchpad as a string.
+    ['human', '{input}\n\n{agent_scratchpad}'],
 ]);
 
 // --- 4. Set up the Express Server ---
