@@ -77,6 +77,13 @@ app.post("/api/gcloud", async (req, res) => {
     if (!userPrompt) {
         return res.status(400).json({ response: 'Prompt not provided in the request body' });
     }
+    
+    // --- THIS IS THE FIX: Transform history for the Vertex AI API ---
+    const transformedHistory = history.map((msg: any) => ({
+        role: msg.type === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.content }]
+    })).filter((msg: any) => msg.parts[0].text && msg.role);
+
 
     // --- Targeted Context Injection ---
     const immediateContext = extractContext(history);
@@ -97,7 +104,7 @@ app.post("/api/gcloud", async (req, res) => {
     let tool: string;
     let command: string;
     try {
-        const chat = generativeModel.startChat({ history: history as Content[] });
+        const chat = generativeModel.startChat({ history: transformedHistory as Content[] });
         const result = await chat.sendMessage(augmentedPrompt);
         const rawResponseText = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
 
