@@ -1,173 +1,121 @@
-#!/usr/bin/env node
-// Triggering CI/CD
-import express from "express";
-import cors from "cors";
-import { spawn } from "child_process";
-import { Content, VertexAI } from '@google-cloud/vertexai';
+import express, { Request, Response } from 'express';
+import cors from 'cors';
+import { ChatVertexAI } from '@langchain/google-vertexai';
+import { AgentExecutor, createReactAgent } from 'langchain/agents';
+import { ChatPromptTemplate, MessagesPlaceholder } from '@langchain/core/prompts';
+import { AIMessage, BaseMessage, HumanMessage } from '@langchain/core/messages';
+import { googleCloudSdkTool } from './tools/gcloud_tool';
 
-// --- Initialize Vertex AI and Express ---
-const vertex_ai = new VertexAI({ project: process.env.GCLOUD_PROJECT, location: 'us-central1' });
-const model = 'gemini-2.5-pro';
+// Define the shape of the history messages for type safety
+interface HistoryMessage {
+    type: 'user' | 'ai';
+    content: string;
+}
 
-// --- AGENT BRAIN 1: The Command Generator ---
-const generativeModel = vertex_ai.getGenerativeModel({
-    model: model,
-    systemInstruction: {
-        role: 'system',
-        parts: [{
-            text: `You are an expert in Google Cloud command-line tools. Your sole purpose is to translate a user's natural language request into a single, executable command for one of the following tools: gcloud, gsutil, kubectl, bq. Do not engage in conversation. If critical information is provided in a [CONTEXT] block, you MUST use it.
-
-CRITICAL RULES:
-1.  **Output Format:** Your output MUST be a single, valid JSON object with two keys: "tool" and "args". The "args" value MUST be an array of strings representing the command arguments. DO NOT include the tool name itself in the "args" array.
-    Example for "gcloud compute instances list in project my-proj":
-    {
-      "tool": "gcloud",
-      "args": ["compute", "instances", "list", "--project", "my-proj"]
-    }
-    Example for "list files in my-bucket":
-    {
-      "tool": "gsutil",
-      "args": ["ls", "gs://my-bucket"]
-    }
-2.  **Error Keywords:** For any case where a command cannot be generated, you MUST respond with one of the following keywords: ERROR, NEEDS_PROJECT, NEEDS_LOCATION, ERROR_MULTIPLE_RESOURCES.
-3.  **Context Usage:** You MUST prioritize information from the [CONTEXT] block.
-4.  **Error Correction:** If the conversation history shows a command failed due to a missing flag (like --location) and the user's new prompt provides that info, reconstruct the command with the new information.
-5.  **No Shell Operations:** Do not use shell features like pipes (\`|\`), redirection (\`>\`), or chaining (\`&&\`).
-6.  **gsutil Paths:** All gsutil paths MUST start with \`gs://\`.
-7.  **Metadata Strategy:** For questions about resource details, generate a command to retrieve the full resource metadata (e.g., \`bq show --format=json ...\`).
-8.  **Kubernetes Credentials:** If a \`kubectl\` command is requested, first check the history. If \`gcloud container clusters get-credentials\` has not already been successfully run for that cluster, you MUST generate that command first. Otherwise, generate the requested \`kubectl\` command.
-9.  **File Operations:**
-    - To **list the files within a bucket**, you MUST use the \`gcloud storage ls\` command.
-    - To **download, view, get, read, or see the content of a *specific* file** from a GCS bucket, first check the conversation history. If the bucket's location has not been determined, you MUST generate a \`gcloud storage buckets describe gs://BUCKET_NAME --format=value(location)\` command. Only if the location is known should you generate the \`gcloud storage sign-url\` command, including the location with the \`--location\` flag.
-10. **Contextual Follow-up:** For follow-up requests, you MUST reuse the full resource identifiers from the previous successful commands in the conversation history.`
-        }]
-    }
+// --- 1. Initialize Model and Tools ---
+const model = new ChatVertexAI({
+    model: 'gemini-2.5-pro',
+    temperature: 0,
 });
 
+const tools = [googleCloudSdkTool];
+
+// --- 2. Create the Agent Prompt ---
+// The prompt must include placeholders for the tools and tool names, which are
+// automatically populated by the createReactAgent function.
+const prompt = ChatPromptTemplate.fromMessages([
+    [
+        'system',
+        `You are a helpful assistant who is an expert in Google Cloud. You have access to a tool that can execute Google Cloud command-line interface commands (gcloud, gsutil, kubectl, bq). When a user asks for an action, use this tool to fulfill their request.
+
+TOOLS:
+------
+Here are the tools you can use:
+
+{tools}
+
+Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question`,
+    ],
+    new MessagesPlaceholder({ variableName: 'chat_history', optional: true }),
+    ['human', '{input}'],
+    new MessagesPlaceholder('agent_scratchpad'),
+]);
+
+// --- 4. Set up the Express Server ---
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-async function executeCommand(tool: string, args: string[], accessToken: string): Promise<{ code: number | null, output: string, error: string, command: string }> {
-    return new Promise((resolve) => {
-        const fullCommand = `${tool} ${args.join(' ')}`;
-        const executablePath = `/usr/bin/${tool}`;
+// We must wrap the agent creation and server startup in an async function
+// to correctly handle the promise returned by createReactAgent.
+async function startServer() {
+    // --- 3. Create the Agent and Executor ---
+    const agent = await createReactAgent({ 
+        llm: model, 
+        tools, 
+        prompt 
+    });
 
-        const env: { [key: string]: string | undefined } = {
-            ...process.env,
-            CLOUDSDK_CORE_DISABLE_PROMPTS: "1",
-        };
-        if (!fullCommand.includes('storage sign-url')) {
-            env.CLOUDSDK_AUTH_ACCESS_TOKEN = accessToken;
+    const agentExecutor = new AgentExecutor({ 
+        agent, 
+        tools, 
+        verbose: true // Set to true for detailed logging
+    });
+
+    // --- 5. Define the API Endpoint ---
+    app.post('/api/gcloud', async (req: Request, res: Response) => {
+        console.log("--- NEW GCLOUD-BACKEND REQUEST ---");
+        console.log(`[REQUEST_BODY]: ${JSON.stringify(req.body)}`);
+
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ response: 'Authorization (Access Token) not provided or invalid' });
+        }
+        const accessToken = authHeader.split(' ')[1];
+
+        const { prompt: userPrompt, history = [] } = req.body;
+        if (!userPrompt) {
+            return res.status(400).json({ response: 'Prompt not provided in the request body' });
         }
 
-        const child = spawn(executablePath, args, { env: env as any });
+        try {
+            // The AgentExecutor now handles the entire conversation flow.
+            const result = await agentExecutor.invoke(
+                {
+                    input: userPrompt,
+                    chat_history: history.map((msg: HistoryMessage) => 
+                        msg.type === 'user' 
+                            ? new HumanMessage(msg.content) 
+                            : new AIMessage(msg.content)
+                    ) as BaseMessage[],
+                },
+                // This passes the access token securely to the gcloud_tool
+                { configurable: { accessToken } }
+            );
 
-        let output = "";
-        let error = "";
-        child.stdout.on("data", (data) => (output += data.toString()));
-        child.stderr.on("data", (data) => (error += data.toString()));
-        
-        child.on("error", (err) => {
-            error += err.message;
-            resolve({ code: -1, output, error, command: fullCommand });
-        });
+            res.json({ response: result.output });
 
-        child.on("close", (code) => {
-            resolve({ code, output, error, command: fullCommand });
-        });
+        } catch (error: any) { // Type the error to access its properties
+            console.error("[AGENT_EXECUTOR_ERROR]", error);
+            res.status(500).json({ response: `An internal error occurred: ${error.message}` });
+        }
+    });
+
+    const PORT = process.env.PORT || 8080;
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log(`-> AgentUI REST endpoint available at /api/gcloud`);
     });
 }
 
-app.post("/api/gcloud", async (req, res) => {
-    console.log("--- NEW GCLOUD-BACKEND REQUEST ---");
-    console.log(`[REQUEST_BODY]: ${JSON.stringify(req.body)}`);
-
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ response: 'Authorization (Access Token) not provided or invalid' });
-    }
-    const accessToken = authHeader.split(' ')[1];
-
-    let { prompt: userPrompt, history = [] } = req.body;
-    if (!userPrompt) {
-        return res.status(400).json({ response: 'Prompt not provided in the request body' });
-    }
-
-    let finalOutput = "";
-    let finalError = "";
-    let finalCode: number | null = 0;
-
-    for (let i = 0; i < 2; i++) { 
-        const transformedHistory = history.map((msg: any) => ({
-            role: msg.type === 'user' ? 'user' : 'model',
-            parts: [{ text: msg.content }]
-        })).filter((msg: any) => msg.parts[0].text && msg.role);
-
-        try {
-            const chat = generativeModel.startChat({ history: transformedHistory as Content[] });
-            const result = await chat.sendMessage(userPrompt);
-            const rawResponseText = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-
-            if (!rawResponseText || rawResponseText.toUpperCase() === "ERROR") {
-                return res.status(400).json({ response: `I\'m sorry, but I couldn\'t translate that request into a valid command. Please try rephrasing your request.` });
-            }
-
-            const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
-            const match = rawResponseText.match(jsonRegex);
-            const cleanedText = match ? match[1] : rawResponseText;
-            const aiResponse = JSON.parse(cleanedText);
-
-            const { tool, args } = aiResponse;
-            console.log(`[ATTEMPT ${i + 1}] Parsed Command:`, { tool, args });
-
-            const execResult = await executeCommand(tool, args, accessToken);
-            finalCode = execResult.code;
-            finalOutput = execResult.output;
-            finalError = execResult.error;
-            
-            history.push({ type: 'user', content: userPrompt });
-            history.push({ type: 'bot', content: `> Executed: ${execResult.command}\n\n${execResult.output}` });
-
-            const isPrerequisite = execResult.command.includes('container clusters get-credentials') || execResult.command.includes('storage buckets describe');
-
-            if (finalCode === 0 && isPrerequisite && i < 1) {
-                console.log(`[ATTEMPT ${i + 1}] Prerequisite command successful. Looping to get next command.`);
-                continue;
-            } else {
-                break;
-            }
-        } catch (error: any) {
-            console.error("[LOOP ERROR]", error);
-            return res.status(500).json({ response: `An internal error occurred: ${error.message}` });
-        }
-    }
-
-    // --- Final Response Handling ---
-    if (finalCode !== 0) {
-        try {
-            const errorAnalyzerModel = vertex_ai.getGenerativeModel({ model: model, systemInstruction: { role: 'system', parts: [{ text: `A command failed. Explain the error in a simple, human-readable way and suggest a solution. If a flag is missing, ask for it.` }] } });
-            const result = await errorAnalyzerModel.generateContent(finalError);
-            const friendlyError = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-            res.status(400).json({ response: friendlyError || `The command failed, and I was unable to determine the cause.` });
-        } catch (analysisError: any) {
-            res.status(500).json({ response: `The command failed, and I was unable to analyze the error. Raw error:\n\n${finalError}` });
-        }
-    } else {
-        try {
-            const summarizerPrompt = `You are a helpful Google Cloud assistant. Summarize the following command output to directly answer the user\'s original request of: '${userPrompt}'. Be concise and clear.`;
-            const summarizerModel = vertex_ai.getGenerativeModel({ model: model, systemInstruction: { role: 'system', parts: [{ text: summarizerPrompt }] } });
-            const result = await summarizerModel.generateContent(`Command Output:\n\n${finalOutput}`);
-            const summary = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-            res.json({ response: summary || finalOutput });
-        } catch (e) {
-            res.json({ response: `I ran the command, but had trouble summarizing the results. Here is the raw output:\n\n${finalOutput}` });
-        }
-    }
-});
-
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`-> AgentUI REST endpoint available at /api/gcloud`);
-});
+// Start the server
+startServer();
