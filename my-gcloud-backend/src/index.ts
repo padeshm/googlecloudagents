@@ -38,29 +38,40 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- Helper Function to Extract Context ---
-function extractContext(history: any[]): any {
-    const context: any = {};
-    if (history.length === 0) return context;
+async function executeCommand(tool: string, command: string, accessToken: string): Promise<{ code: number | null, output: string, error: string }> {
+    return new Promise((resolve) => {
+        const executablePath = `/usr/bin/${tool}`;
+        let args = command.split(" ").filter(arg => arg);
 
-    const lastBotMessage = history[history.length - 1];
-
-    if (lastBotMessage && lastBotMessage.content) {
-        // Extract project from any gcloud command
-        const projectMatch = lastBotMessage.content.match(/project \`([^`]+)\`/);
-        if (projectMatch) context.project = projectMatch[1];
-
-        // Extract bucket name from listing files
-        const bucketMatch = lastBotMessage.content.match(/bucket \`([^`]+)\`/);
-        if (bucketMatch) context.bucket = bucketMatch[1];
-
-        // Extract instance name from VM list
-        const instanceMatches = [...lastBotMessage.content.matchAll(/\*\*\s*([^\*]+)\*\* in the \`([^`]+)\` zone/g)];
-        if (instanceMatches.length > 0) {
-            context.instances = instanceMatches.map((m:any) => ({ name: m[1], zone: m[2] }));
+        if (args.length > 0 && args[0] === tool) {
+            args.shift();
         }
-    }
-    return context;
+
+        const env: { [key: string]: string | undefined } = {
+            ...process.env,
+            CLOUDSDK_CORE_DISABLE_PROMPTS: "1",
+        };
+        if (!command.includes('storage sign-url')) {
+            env.CLOUDSDK_AUTH_ACCESS_TOKEN = accessToken;
+        }
+
+        const child = spawn(executablePath, args, { env: env as any });
+
+        let output = "";
+        let error = "";
+        child.stdout.on("data", (data) => (output += data.toString()));
+        child.stderr.on("data", (data) => (error += data.toString()));
+        
+        child.on("error", (err) => {
+            // This is for spawn errors (e.g., command not found)
+            error += err.message;
+            resolve({ code: -1, output, error });
+        });
+
+        child.on("close", (code) => {
+            resolve({ code, output, error });
+        });
+    });
 }
 
 app.post("/api/gcloud", async (req, res) => {
@@ -73,117 +84,82 @@ app.post("/api/gcloud", async (req, res) => {
     }
     const accessToken = authHeader.split(' ')[1];
 
-    const { prompt: userPrompt, history = [] } = req.body;
+    let { prompt: userPrompt, history = [] } = req.body;
     if (!userPrompt) {
         return res.status(400).json({ response: 'Prompt not provided in the request body' });
     }
-    
-    const transformedHistory = history.map((msg: any) => ({
-        role: msg.type === 'user' ? 'user' : 'model',
-        parts: [{ text: msg.content }]
-    })).filter((msg: any) => msg.parts[0].text && msg.role);
 
-    const immediateContext = extractContext(history);
-    let augmentedPrompt = userPrompt;
-    if (Object.keys(immediateContext).length > 0) {
-        const contextString = Object.entries(immediateContext)
-            .map(([key, value]) => {
-                if (key === 'instances') {
-                    return `instances: ${JSON.stringify(value)}`;
-                }
-                return `${key}: ${value}`;
-            })
-            .join('\n');
-        augmentedPrompt = `[CONTEXT]\n${contextString}\n\n[USER_PROMPT]\n${userPrompt}`;
-    }
-    console.log(`[AUGMENTED_PROMPT]: ${augmentedPrompt}`);
+    let finalOutput = "";
+    let finalError = "";
+    let finalCode: number | null = 0;
 
-    let tool: string;
-    let command: string;
-    try {
-        const chat = generativeModel.startChat({ history: transformedHistory as Content[] });
-        const result = await chat.sendMessage(augmentedPrompt);
-        const rawResponseText = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+    for (let i = 0; i < 2; i++) { // Allow for a maximum of 2 chained commands
+        const transformedHistory = history.map((msg: any) => ({
+            role: msg.type === 'user' ? 'user' : 'model',
+            parts: [{ text: msg.content }]
+        })).filter((msg: any) => msg.parts[0].text && msg.role);
 
-        if (!rawResponseText) {
-            return res.status(500).json({ response: "The AI model returned an invalid or empty response." });
-        }
-
-        console.log(`[AI_RESPONSE]: ${rawResponseText}`);
-
-        const upperResponse = rawResponseText.toUpperCase();
-        const errorMap: { [key: string]: string } = {
-            NEEDS_PROJECT: "I can do that. For which project would you like me to get this information?",
-            NEEDS_LOCATION: "I can do that, but I need to know the Google Cloud location/region to check. Where should I look?",
-            ERROR_MULTIPLE_RESOURCES: `I\'m sorry, I can only perform operations on one resource at a time. Please ask me again for each resource individually.`,
-            ERROR: `I\'m sorry, but I couldn\'t translate that request into a valid command. Please try rephrasing your request.`
-        };
-        if (errorMap[upperResponse]) {
-            return res.status(400).json({ response: errorMap[upperResponse] });
-        }
-
-        const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
-        const match = rawResponseText.match(jsonRegex);
-        const cleanedText = match ? match[1] : rawResponseText;
-
-        const aiResponse = JSON.parse(cleanedText);
-        tool = aiResponse.tool;
-        command = aiResponse.command;
-        console.log(`[PARSED_COMMAND]: Tool: '${tool}', Command: '${command}'`);
-
-    } catch (error: any) {
-        console.error("[Vertex AI] Error during command generation or parsing:", error);
-        return res.status(500).json({ response: `Sorry, I received an invalid response from the AI model. Please try your request again.` });
-    }
-    
-    // --- Command Execution & Response ---
-    const executablePath = `/usr/bin/${tool}`;
-    let args = command.split(" ").filter(arg => arg);
-
-    // --- FIX: Defensively remove the tool name if the AI includes it ---
-    if (args.length > 0 && args[0] === tool) {
-        args.shift();
-    }
-
-    const env: { [key: string]: string | undefined } = {
-        ...process.env,
-        CLOUDSDK_CORE_DISABLE_PROMPTS: "1",
-    };
-    if (!command.includes('storage sign-url')) {
-        env.CLOUDSDK_AUTH_ACCESS_TOKEN = accessToken;
-    }
-
-    const child = spawn(executablePath, args, { env: env as any });
-
-    let output = "";
-    let error = "";
-    child.stdout.on("data", (data) => (output += data.toString()));
-    child.stderr.on("data", (data) => (error += data.toString()));
-
-    child.on("close", async (code) => {
-        if (code !== 0) {
-             try {
-                const errorAnalyzerModel = vertex_ai.getGenerativeModel({ model: model, systemInstruction: { role: 'system', parts: [{ text: `A command failed. Explain the error in a simple, human-readable way and suggest a solution. If a flag is missing, ask for it.` }] } });
-                const result = await errorAnalyzerModel.generateContent(error);
-                const friendlyError = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-                return res.status(400).json({ response: friendlyError || `The command failed, and I was unable to determine the cause.` });
-            } catch (analysisError: any) {
-                return res.status(500).json({ response: `The command failed, and I was unable to analyze the error. Raw error:\n\n${error}` });
-            }
-        }
-        
         try {
-             const summarizerModel = vertex_ai.getGenerativeModel({
-                model: model,
-                systemInstruction: { role: 'system', parts: [{ text: `You are a helpful Google Cloud assistant. Summarize the command output to directly answer the user\'s original request: '${userPrompt}'. Special Rules: 1. If the command was \`gcloud container clusters get-credentials\`, your summary MUST be: "Okay, I\'ve now configured access to that cluster. Please ask me again to perform your desired action, and I\'ll be able to do it.". 2. If the command was \`gcloud storage buckets describe\`, your summary MUST be: "I\'ve found the bucket\'s location. Please ask me again to get the file, and I\'ll be able to create the download link for you."` }] }
-            });
-            const result = await summarizerModel.generateContent(`Command Output:\n\n${output}`);
-            const summary = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-            res.json({ response: summary || output });
-        } catch (e) {
-            res.json({ response: `I ran the command, but had trouble summarizing the results. Here is the raw output:\n\n${output}` });
+            const chat = generativeModel.startChat({ history: transformedHistory as Content[] });
+            const result = await chat.sendMessage(userPrompt);
+            const rawResponseText = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+
+            if (!rawResponseText || rawResponseText.toUpperCase() === "ERROR") {
+                return res.status(400).json({ response: `I\'m sorry, but I couldn\'t translate that request into a valid command. Please try rephrasing your request.` });
+            }
+
+            const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
+            const match = rawResponseText.match(jsonRegex);
+            const cleanedText = match ? match[1] : rawResponseText;
+            const aiResponse = JSON.parse(cleanedText);
+
+            const { tool, command } = aiResponse;
+            console.log(`[ATTEMPT ${i + 1}] Parsed Command:`, { tool, command });
+
+            const execResult = await executeCommand(tool, command, accessToken);
+            finalCode = execResult.code;
+            finalOutput = execResult.output;
+            finalError = execResult.error;
+            
+            // Update history for the next potential loop
+            history.push({ type: 'user', content: userPrompt });
+            history.push({ type: 'bot', content: `> Executed: ${tool} ${command}\n\n${execResult.output}` });
+
+            const isPrerequisite = command.includes('container clusters get-credentials') || command.includes('storage buckets describe');
+
+            if (finalCode === 0 && isPrerequisite && i < 1) {
+                console.log(`[ATTEMPT ${i + 1}] Prerequisite command successful. Looping to get next command.`);
+                continue; // Loop to run the generator again with updated history
+            } else {
+                break; // Exit the loop on final command, error, or loop limit
+            }
+        } catch (error: any) {
+            console.error("[LOOP ERROR]", error);
+            return res.status(500).json({ response: `An internal error occurred: ${error.message}` });
         }
-    });
+    }
+
+    // --- Final Response Handling ---
+    if (finalCode !== 0) {
+        try {
+            const errorAnalyzerModel = vertex_ai.getGenerativeModel({ model: model, systemInstruction: { role: 'system', parts: [{ text: `A command failed. Explain the error in a simple, human-readable way and suggest a solution. If a flag is missing, ask for it.` }] } });
+            const result = await errorAnalyzerModel.generateContent(finalError);
+            const friendlyError = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            res.status(400).json({ response: friendlyError || `The command failed, and I was unable to determine the cause.` });
+        } catch (analysisError: any) {
+            res.status(500).json({ response: `The command failed, and I was unable to analyze the error. Raw error:\n\n${finalError}` });
+        }
+    } else {
+        try {
+            const summarizerPrompt = `You are a helpful Google Cloud assistant. Summarize the following command output to directly answer the user\'s original request of: '${userPrompt}'. Be concise and clear.`;
+            const summarizerModel = vertex_ai.getGenerativeModel({ model: model, systemInstruction: { role: 'system', parts: [{ text: summarizerPrompt }] } });
+            const result = await summarizerModel.generateContent(`Command Output:\n\n${finalOutput}`);
+            const summary = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            res.json({ response: summary || finalOutput });
+        } catch (e) {
+            res.json({ response: `I ran the command, but had trouble summarizing the results. Here is the raw output:\n\n${finalOutput}` });
+        }
+    }
 });
 
 const PORT = process.env.PORT || 8080;
