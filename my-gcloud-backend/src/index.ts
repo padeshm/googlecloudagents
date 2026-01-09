@@ -115,7 +115,16 @@ async function startServer() {
 
         } catch (error: any) { // Type the error to access its properties
             console.error("[AGENT_EXECUTOR_ERROR]", error);
-            res.status(500).json({ response: `An internal error occurred: ${error.message}` });
+            // Check for the specific parsing error
+            if (error.message && error.message.includes("Could not parse LLM output")) {
+                // Extract the human-readable part of the error
+                const match = error.message.match(/Could not parse LLM output: (.*)/);
+                const readableError = match ? match[1] : "Sorry, I encountered an unexpected error.";
+                console.log(`[PARSING_ERROR_HANDLER] Caught parsing error. Sending readable response: "${readableError}"`);
+                res.json({ response: readableError });
+            } else {
+                res.status(500).json({ response: `An internal error occurred: ${error.message}` });
+            }
         }
     });
 
