@@ -98,7 +98,7 @@ class GoogleCloudSDK extends Tool {
                 resolve(stdout);
             }
           } else {
-            resolve(stderr);
+            resolve(`Error: Command failed with exit code ${code}. Stderr: ${stderr}`);
           }
         });
     
