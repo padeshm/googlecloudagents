@@ -78,14 +78,11 @@ app.post("/api/gcloud", async (req, res) => {
         return res.status(400).json({ response: 'Prompt not provided in the request body' });
     }
     
-    // --- THIS IS THE FIX: Transform history for the Vertex AI API ---
     const transformedHistory = history.map((msg: any) => ({
         role: msg.type === 'user' ? 'user' : 'model',
         parts: [{ text: msg.content }]
     })).filter((msg: any) => msg.parts[0].text && msg.role);
 
-
-    // --- Targeted Context Injection ---
     const immediateContext = extractContext(history);
     let augmentedPrompt = userPrompt;
     if (Object.keys(immediateContext).length > 0) {
@@ -141,7 +138,13 @@ app.post("/api/gcloud", async (req, res) => {
     
     // --- Command Execution & Response ---
     const executablePath = `/usr/bin/${tool}`;
-    const args = command.split(" ").filter(arg => arg);
+    let args = command.split(" ").filter(arg => arg);
+
+    // --- FIX: Defensively remove the tool name if the AI includes it ---
+    if (args.length > 0 && args[0] === tool) {
+        args.shift();
+    }
+
     const env: { [key: string]: string | undefined } = {
         ...process.env,
         CLOUDSDK_CORE_DISABLE_PROMPTS: "1",
