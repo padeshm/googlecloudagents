@@ -15,12 +15,12 @@ const generativeModel = vertex_ai.getGenerativeModel({
     systemInstruction: {
         role: 'system',
         parts: [{
-            text: `You are an expert in Google Cloud command-line tools. Your sole purpose is to translate a user\'s natural language request into a single, executable command for one of the following tools: gcloud, gsutil, kubectl, bq. Do not engage in conversation.
+            text: `You are an expert in Google Cloud command-line tools. Your sole purpose is to translate a user\'s natural language request into a single, executable command for one of the following tools: gcloud, gsutil, kubectl, bq. Do not engage in conversation. If critical information is provided in a [CONTEXT] block, you MUST use it.
 
 CRITICAL RULES:
 1.  **Output Format:** If you can generate a valid command, your output MUST be a single, valid JSON object with two keys: "tool" and "command".
-2.  **Error Keywords:** For any case where a command cannot be generated (e.g., ambiguity, conversational prompt, impossible request), you MUST respond with a single keyword. You may use one of the following: ERROR, NEEDS_PROJECT, NEEDS_LOCATION, ERROR_MULTIPLE_RESOURCES.
-3.  **One Command Only:** If the user asks for an action on multiple resources, respond with the keyword: \`ERROR_MULTIPLE_RESOURCES\`.
+2.  **Error Keywords:** For any case where a command cannot be generated, you MUST respond with one of the following keywords: ERROR, NEEDS_PROJECT, NEEDS_LOCATION, ERROR_MULTIPLE_RESOURCES.
+3.  **Context Usage:** You MUST prioritize information from the [CONTEXT] block.
 4.  **Error Correction:** If the conversation history shows a command failed due to a missing flag (like --location) and the user\'s new prompt provides that info, reconstruct the command with the new information.
 5.  **No Shell Operations:** Do not use shell features like pipes (\`|\`), redirection (\`>\`), or chaining (\`&&\`).
 6.  **gsutil Paths:** All gsutil paths MUST start with \`gs://\`.
@@ -28,8 +28,8 @@ CRITICAL RULES:
 8.  **Kubernetes Credentials:** If a \`kubectl\` command is requested, first check the history. If \`gcloud container clusters get-credentials\` has not already been successfully run for that cluster, you MUST generate that command first. Otherwise, generate the requested \`kubectl\` command.
 9.  **File Operations:**
     - To **list the files within a bucket**, you MUST use the \`gcloud storage ls\` command.
-    - To **download, view, get, read, or see the content of a *specific* file** from a GCS bucket, first check the conversation history. If the bucket's location has not been determined, you MUST generate a \`gcloud storage buckets describe gs://BUCKET_NAME --format='value(location)'\` command, replacing BUCKET_NAME with the actual bucket name. Only if the location is already known from the history should you generate the \`gcloud storage sign-url\` command, including the location with the \`--location\` flag.
-10. **Contextual Follow-up:** For follow-up requests, you MUST reuse the full resource identifiers from the previous successful commands in the conversation history. For example, if you just listed files in \`gs://my-bucket\`, and the user says "now download file.txt", you must construct the full path \`gs://my-bucket/file.txt\`.`
+    - To **download, view, get, read, or see the content of a *specific* file** from a GCS bucket, first check the conversation history. If the bucket's location has not been determined, you MUST generate a \`gcloud storage buckets describe gs://BUCKET_NAME --format='value(location)'\` command. Only if the location is known should you generate the \`gcloud storage sign-url\` command, including the location with the \`--location\` flag.
+10. **Contextual Follow-up:** For follow-up requests, you MUST reuse the full resource identifiers from the previous successful commands in the conversation history.`
         }]
     }
 });
@@ -37,6 +37,31 @@ CRITICAL RULES:
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// --- Helper Function to Extract Context ---
+function extractContext(history: any[]): any {
+    const context: any = {};
+    if (history.length === 0) return context;
+
+    const lastBotMessage = history[history.length - 1];
+
+    if (lastBotMessage && lastBotMessage.content) {
+        // Extract project from any gcloud command
+        const projectMatch = lastBotMessage.content.match(/project \`([^`]+)\`/);
+        if (projectMatch) context.project = projectMatch[1];
+
+        // Extract bucket name from listing files
+        const bucketMatch = lastBotMessage.content.match(/bucket \`([^`]+)\`/);
+        if (bucketMatch) context.bucket = bucketMatch[1];
+
+        // Extract instance name from VM list
+        const instanceMatches = [...lastBotMessage.content.matchAll(/\*\*\s*([^\*]+)\*\* in the \`([^`]+)\` zone/g)];
+        if (instanceMatches.length > 0) {
+            context.instances = instanceMatches.map((m:any) => ({ name: m[1], zone: m[2] }));
+        }
+    }
+    return context;
+}
 
 app.post("/api/gcloud", async (req, res) => {
     console.log("--- NEW GCLOUD-BACKEND REQUEST ---");
@@ -53,54 +78,50 @@ app.post("/api/gcloud", async (req, res) => {
         return res.status(400).json({ response: 'Prompt not provided in the request body' });
     }
 
-    // Create a modified history for the AI that includes raw command output
-    const historyForAi = history.map((msg: any) => {
-        if (msg.type === 'bot' && msg.rawOutput) {
-            return {
-                role: 'model',
-                parts: [{
-                    text: `Command \`${msg.executedCommand}\` was executed.\nRAW_OUTPUT:\n\`\`\`\n${msg.rawOutput}\n\`\`\`\nSUMMARY_FOR_USER:\n${msg.content}`
-                }]
-            };
-        }
-        return {
-            role: msg.type === 'user' ? 'user' : 'model',
-            parts: [{ text: msg.content }]
-        };
-    }).filter((msg: any) => msg.parts[0].text && msg.role);
-
+    // --- Targeted Context Injection ---
+    const immediateContext = extractContext(history);
+    let augmentedPrompt = userPrompt;
+    if (Object.keys(immediateContext).length > 0) {
+        const contextString = Object.entries(immediateContext)
+            .map(([key, value]) => {
+                if (key === 'instances') {
+                    return `instances: ${JSON.stringify(value)}`;
+                }
+                return `${key}: ${value}`;
+            })
+            .join('\n');
+        augmentedPrompt = `[CONTEXT]\n${contextString}\n\n[USER_PROMPT]\n${userPrompt}`;
+    }
+    console.log(`[AUGMENTED_PROMPT]: ${augmentedPrompt}`);
 
     let tool: string;
     let command: string;
     try {
-        const chat = generativeModel.startChat({ history: historyForAi as Content[] });
-        const result = await chat.sendMessage(userPrompt);
+        const chat = generativeModel.startChat({ history: history as Content[] });
+        const result = await chat.sendMessage(augmentedPrompt);
         const rawResponseText = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
 
         if (!rawResponseText) {
             return res.status(500).json({ response: "The AI model returned an invalid or empty response." });
         }
-        
+
         console.log(`[AI_RESPONSE]: ${rawResponseText}`);
 
         const upperResponse = rawResponseText.toUpperCase();
-        if (upperResponse === "NEEDS_PROJECT") {
-            return res.json({ response: "I can do that. For which project would you like me to get this information?" });
-        }
-        if (upperResponse === "NEEDS_LOCATION") {
-            return res.json({ response: "I can do that, but I need to know the Google Cloud location/region to check. Where should I look?" });
-        }
-        if (upperResponse === "ERROR_MULTIPLE_RESOURCES") {
-            return res.status(400).json({ response: `I\'m sorry, I can only perform operations on one resource at a time. Please ask me again for each resource individually.` });
-        }
-        if (upperResponse === "ERROR") {
-            return res.status(400).json({ response: `I\'m sorry, but I couldn\'t translate that request into a valid command. Please try rephrasing your request.` });
+        const errorMap: { [key: string]: string } = {
+            NEEDS_PROJECT: "I can do that. For which project would you like me to get this information?",
+            NEEDS_LOCATION: "I can do that, but I need to know the Google Cloud location/region to check. Where should I look?",
+            ERROR_MULTIPLE_RESOURCES: `I\'m sorry, I can only perform operations on one resource at a time. Please ask me again for each resource individually.`,
+            ERROR: `I\'m sorry, but I couldn\'t translate that request into a valid command. Please try rephrasing your request.`
+        };
+        if (errorMap[upperResponse]) {
+            return res.status(400).json({ response: errorMap[upperResponse] });
         }
 
         const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
         const match = rawResponseText.match(jsonRegex);
         const cleanedText = match ? match[1] : rawResponseText;
-        
+
         const aiResponse = JSON.parse(cleanedText);
         tool = aiResponse.tool;
         command = aiResponse.command;
@@ -110,85 +131,47 @@ app.post("/api/gcloud", async (req, res) => {
         console.error("[Vertex AI] Error during command generation or parsing:", error);
         return res.status(500).json({ response: `Sorry, I received an invalid response from the AI model. Please try your request again.` });
     }
-
-    const toolPaths: { [key: string]: string } = {
-        'gcloud': '/usr/bin/gcloud', 'gsutil': '/usr/bin/gsutil', 'kubectl': '/usr/bin/kubectl', 'bq': '/usr/bin/bq'
-    };
-    const executablePath = toolPaths[tool];
-    if (!executablePath) {
-        return res.status(403).json({ response: `The command tool '${tool}' is not in the list of allowed tools.` });
-    }
+    
+    // --- Command Execution & Response ---
+    const executablePath = `/usr/bin/${tool}`;
     const args = command.split(" ").filter(arg => arg);
-    if (args.length > 0 && args[0] === tool) args.shift();
-
     const env: { [key: string]: string | undefined } = {
         ...process.env,
         CLOUDSDK_CORE_DISABLE_PROMPTS: "1",
     };
-
-    // The 'sign-url' command needs to use the service account credentials to create a cryptographic signature,
-    // and it cannot do this with a user's temporary access token. By NOT providing the access token
-    // for this specific command, we allow gcloud to fall back to the container's ambient
-    // service account credentials, which have the necessary permissions.
     if (!command.includes('storage sign-url')) {
         env.CLOUDSDK_AUTH_ACCESS_TOKEN = accessToken;
     }
 
-    console.log(`[EXECUTION_ENV]: ${JSON.stringify(env)}`);
-    const child = spawn(executablePath, args, {
-        env: env as any
-    });
+    const child = spawn(executablePath, args, { env: env as any });
 
     let output = "";
     let error = "";
     child.stdout.on("data", (data) => (output += data.toString()));
     child.stderr.on("data", (data) => (error += data.toString()));
-    child.on("error", (err) => {
-        console.error(`[SPAWN_ERROR]: ${err.message}`);
-        res.status(500).json({ response: `System Error: Failed to start the command process.` });
-    });
 
     child.on("close", async (code) => {
-        console.log(`[COMMAND_STDOUT]: ${output}`);
-        console.log(`[COMMAND_STDERR]: ${error}`);
-        console.log(`[COMMAND_EXIT_CODE]: ${code}`);
-
         if (code !== 0) {
-            try {
-                const errorAnalyzerModel = vertex_ai.getGenerativeModel({
-                    model: model,
-                    systemInstruction: { role: 'system', parts: [{ text: `You are a helpful Google Cloud assistant. A command has failed. Your goal is to explain the technical error message to a user in a simple, human-readable way. RULES: Do not show the user the raw error message. Analyze the error, explain the root cause, and suggest a solution. If a flag is missing (like --location), ask for it.` }] }
-                });
+             try {
+                const errorAnalyzerModel = vertex_ai.getGenerativeModel({ model: model, systemInstruction: { role: 'system', parts: [{ text: `A command failed. Explain the error in a simple, human-readable way and suggest a solution. If a flag is missing, ask for it.` }] } });
                 const result = await errorAnalyzerModel.generateContent(error);
                 const friendlyError = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
                 return res.status(400).json({ response: friendlyError || `The command failed, and I was unable to determine the cause.` });
             } catch (analysisError: any) {
-                console.error("[Vertex AI] Error during error analysis:", analysisError);
                 return res.status(500).json({ response: `The command failed, and I was unable to analyze the error. Raw error:\n\n${error}` });
             }
         }
-
+        
         try {
-            const summarizerModel = vertex_ai.getGenerativeModel({
+             const summarizerModel = vertex_ai.getGenerativeModel({
                 model: model,
-                systemInstruction: { role: 'system', parts: [{ text: `You are a helpful Google Cloud assistant. Your goal is to summarize the output of a command in a clear, conversational way. CRITICAL RULES: 1. Directly answer the user\'s original request: '${userPrompt}'. 2. If the output is JSON metadata, find the specific field that answers the question (e.g., \`numRows\`) and present it clearly. 3. If the command was \`gcloud container clusters get-credentials\` and was successful, your summary MUST be: "Okay, I\'ve now configured access to that cluster. Please ask me again to perform your desired action, and I\'ll be able to do it.". 4. If the command output is a URL starting with 'https://storage.googleapis.com/', present it as a download link. Your response should be something like: "Of course. You can download the file using this secure, temporary link: [URL]". Do not add any other text or summary. 5. If the command was \`gcloud storage buckets describe\` and it returned a location, your summary MUST be: "I\'ve found the bucket\'s location. Please ask me again to get the file, and I\'ll be able to create the download link for you."` }] }
+                systemInstruction: { role: 'system', parts: [{ text: `You are a helpful Google Cloud assistant. Summarize the command output to directly answer the user\'s original request: '${userPrompt}'. Special Rules: 1. If the command was \`gcloud container clusters get-credentials\`, your summary MUST be: "Okay, I\'ve now configured access to that cluster. Please ask me again to perform your desired action, and I\'ll be able to do it.". 2. If the command was \`gcloud storage buckets describe\`, your summary MUST be: "I\'ve found the bucket\'s location. Please ask me again to get the file, and I\'ll be able to create the download link for you."` }] }
             });
-            const result = await summarizerModel.generateContent(`Here is the command output:\n\n${output}`);
+            const result = await summarizerModel.generateContent(`Command Output:\n\n${output}`);
             const summary = result.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-            
-            // Return the raw output along with the summary
-            res.json({ 
-                response: summary || output,
-                rawOutput: output,
-                executedCommand: `${tool} ${command}`
-            });
-        } catch (summarizationError: any) {
-            console.error("[Vertex AI] Error during summarization:", summarizationError);
-             res.json({
-                response: `I was able to run the command, but had trouble summarizing the results. Here is the raw output:\n\n> Executed: ${tool} ${command}\n\n${output}`,
-                rawOutput: output,
-                executedCommand: `${tool} ${command}`
-            });
+            res.json({ response: summary || output });
+        } catch (e) {
+            res.json({ response: `I ran the command, but had trouble summarizing the results. Here is the raw output:\n\n${output}` });
         }
     });
 });
