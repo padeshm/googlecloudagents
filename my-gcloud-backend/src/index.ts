@@ -15,20 +15,30 @@ const generativeModel = vertex_ai.getGenerativeModel({
     systemInstruction: {
         role: 'system',
         parts: [{
-            text: `You are an expert in Google Cloud command-line tools. Your sole purpose is to translate a user\'s natural language request into a single, executable command for one of the following tools: gcloud, gsutil, kubectl, bq. Do not engage in conversation. If critical information is provided in a [CONTEXT] block, you MUST use it.
+            text: `You are an expert in Google Cloud command-line tools. Your sole purpose is to translate a user's natural language request into a single, executable command for one of the following tools: gcloud, gsutil, kubectl, bq. Do not engage in conversation. If critical information is provided in a [CONTEXT] block, you MUST use it.
 
 CRITICAL RULES:
-1.  **Output Format:** If you can generate a valid command, your output MUST be a single, valid JSON object with two keys: "tool" and "command".
+1.  **Output Format:** Your output MUST be a single, valid JSON object with two keys: "tool" and "args". The "args" value MUST be an array of strings representing the command arguments. DO NOT include the tool name itself in the "args" array.
+    Example for "gcloud compute instances list in project my-proj":
+    {
+      "tool": "gcloud",
+      "args": ["compute", "instances", "list", "--project", "my-proj"]
+    }
+    Example for "list files in my-bucket":
+    {
+      "tool": "gsutil",
+      "args": ["ls", "gs://my-bucket"]
+    }
 2.  **Error Keywords:** For any case where a command cannot be generated, you MUST respond with one of the following keywords: ERROR, NEEDS_PROJECT, NEEDS_LOCATION, ERROR_MULTIPLE_RESOURCES.
 3.  **Context Usage:** You MUST prioritize information from the [CONTEXT] block.
-4.  **Error Correction:** If the conversation history shows a command failed due to a missing flag (like --location) and the user\'s new prompt provides that info, reconstruct the command with the new information.
+4.  **Error Correction:** If the conversation history shows a command failed due to a missing flag (like --location) and the user's new prompt provides that info, reconstruct the command with the new information.
 5.  **No Shell Operations:** Do not use shell features like pipes (\`|\`), redirection (\`>\`), or chaining (\`&&\`).
 6.  **gsutil Paths:** All gsutil paths MUST start with \`gs://\`.
 7.  **Metadata Strategy:** For questions about resource details, generate a command to retrieve the full resource metadata (e.g., \`bq show --format=json ...\`).
 8.  **Kubernetes Credentials:** If a \`kubectl\` command is requested, first check the history. If \`gcloud container clusters get-credentials\` has not already been successfully run for that cluster, you MUST generate that command first. Otherwise, generate the requested \`kubectl\` command.
 9.  **File Operations:**
     - To **list the files within a bucket**, you MUST use the \`gcloud storage ls\` command.
-    - To **download, view, get, read, or see the content of a *specific* file** from a GCS bucket, first check the conversation history. If the bucket's location has not been determined, you MUST generate a \`gcloud storage buckets describe gs://BUCKET_NAME --format='value(location)'\` command. Only if the location is known should you generate the \`gcloud storage sign-url\` command, including the location with the \`--location\` flag.
+    - To **download, view, get, read, or see the content of a *specific* file** from a GCS bucket, first check the conversation history. If the bucket's location has not been determined, you MUST generate a \`gcloud storage buckets describe gs://BUCKET_NAME --format=value(location)\` command. Only if the location is known should you generate the \`gcloud storage sign-url\` command, including the location with the \`--location\` flag.
 10. **Contextual Follow-up:** For follow-up requests, you MUST reuse the full resource identifiers from the previous successful commands in the conversation history.`
         }]
     }
@@ -38,20 +48,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-async function executeCommand(tool: string, command: string, accessToken: string): Promise<{ code: number | null, output: string, error: string }> {
+async function executeCommand(tool: string, args: string[], accessToken: string): Promise<{ code: number | null, output: string, error: string, command: string }> {
     return new Promise((resolve) => {
+        const fullCommand = `${tool} ${args.join(' ')}`;
         const executablePath = `/usr/bin/${tool}`;
-        let args = command.split(" ").filter(arg => arg);
-
-        if (args.length > 0 && args[0] === tool) {
-            args.shift();
-        }
 
         const env: { [key: string]: string | undefined } = {
             ...process.env,
             CLOUDSDK_CORE_DISABLE_PROMPTS: "1",
         };
-        if (!command.includes('storage sign-url')) {
+        if (!fullCommand.includes('storage sign-url')) {
             env.CLOUDSDK_AUTH_ACCESS_TOKEN = accessToken;
         }
 
@@ -63,13 +69,12 @@ async function executeCommand(tool: string, command: string, accessToken: string
         child.stderr.on("data", (data) => (error += data.toString()));
         
         child.on("error", (err) => {
-            // This is for spawn errors (e.g., command not found)
             error += err.message;
-            resolve({ code: -1, output, error });
+            resolve({ code: -1, output, error, command: fullCommand });
         });
 
         child.on("close", (code) => {
-            resolve({ code, output, error });
+            resolve({ code, output, error, command: fullCommand });
         });
     });
 }
@@ -93,7 +98,7 @@ app.post("/api/gcloud", async (req, res) => {
     let finalError = "";
     let finalCode: number | null = 0;
 
-    for (let i = 0; i < 2; i++) { // Allow for a maximum of 2 chained commands
+    for (let i = 0; i < 2; i++) { 
         const transformedHistory = history.map((msg: any) => ({
             role: msg.type === 'user' ? 'user' : 'model',
             parts: [{ text: msg.content }]
@@ -113,25 +118,24 @@ app.post("/api/gcloud", async (req, res) => {
             const cleanedText = match ? match[1] : rawResponseText;
             const aiResponse = JSON.parse(cleanedText);
 
-            const { tool, command } = aiResponse;
-            console.log(`[ATTEMPT ${i + 1}] Parsed Command:`, { tool, command });
+            const { tool, args } = aiResponse;
+            console.log(`[ATTEMPT ${i + 1}] Parsed Command:`, { tool, args });
 
-            const execResult = await executeCommand(tool, command, accessToken);
+            const execResult = await executeCommand(tool, args, accessToken);
             finalCode = execResult.code;
             finalOutput = execResult.output;
             finalError = execResult.error;
             
-            // Update history for the next potential loop
             history.push({ type: 'user', content: userPrompt });
-            history.push({ type: 'bot', content: `> Executed: ${tool} ${command}\n\n${execResult.output}` });
+            history.push({ type: 'bot', content: `> Executed: ${execResult.command}\n\n${execResult.output}` });
 
-            const isPrerequisite = command.includes('container clusters get-credentials') || command.includes('storage buckets describe');
+            const isPrerequisite = execResult.command.includes('container clusters get-credentials') || execResult.command.includes('storage buckets describe');
 
             if (finalCode === 0 && isPrerequisite && i < 1) {
                 console.log(`[ATTEMPT ${i + 1}] Prerequisite command successful. Looping to get next command.`);
-                continue; // Loop to run the generator again with updated history
+                continue;
             } else {
-                break; // Exit the loop on final command, error, or loop limit
+                break;
             }
         } catch (error: any) {
             console.error("[LOOP ERROR]", error);
