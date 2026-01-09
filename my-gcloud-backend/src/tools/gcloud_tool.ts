@@ -1,87 +1,100 @@
-import { DynamicTool } from '@langchain/core/tools';
-import { spawn } from 'child_process';
-import { RunnableConfig } from '@langchain/core/runnables';
-import { CallbackManagerForToolRun } from '@langchain/core/callbacks/manager';
+/**
+ * Copyright 2025 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *	http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
-// Define the shape of the input object for the tool for strict type checking.
-interface GoogleCloudSdkInput {
-    tool: 'gcloud' | 'gsutil' | 'kubectl' | 'bq';
-    args: string[];
-}
+import { StructuredTool } from "@langchain/core/tools";
+import { z } from "zod";
+import * as child_process from 'child_process';
+import {
+  AccessControlList,
+  createAccessControlList,
+  denyCommands,
+} from '../denylist';
+import * as gcloud from '../gcloud';
 
-// This function executes a Google Cloud SDK command. It is designed to be called by a LangChain agent.
+// Denylist any command that is interactive or requires a TTY.
+// These commands will hang the process.
+const defaultDeny = [
+  'sftp',
+  'ssh',
+  'docker', // Requires configuring docker-credential-gcr.
+  'gen-repo-info-file',
+];
+
+const accessControl = createAccessControlList([], defaultDeny);
+
 const runGoogleCloudSdkCommand = async (
-    inputStr: string, 
-    runManager?: CallbackManagerForToolRun, 
-    config?: RunnableConfig
+  { tool, args }: { tool: string, args: string[] },
+  // This is a special parameter that allows the agent to pass in the access token.
+  { configurable }: { configurable?: { accessToken?: string } }
 ): Promise<string> => {
-  let input: GoogleCloudSdkInput;
-  try {
-    // The agent passes a JSON string, so we need to parse it first.
-    input = JSON.parse(inputStr);
-  } catch (error: any) {
-    return `Error: Invalid input format. Expected a valid JSON string. Details: ${error.message}`;
+  if (accessControl.check(args.join(' ')).permitted === false) {
+    return accessControl.check(args.join(' ')).message;
   }
 
-  const { tool, args } = input;
-
-  // The agent framework passes an impersonated access token via the configurable context.
-  const accessToken = config?.configurable?.accessToken;
-
-  // If the token is missing, we cannot proceed. This is a critical security check.
-  if (!accessToken) {
-    return 'Error: Authentication token not found in the execution context. This tool cannot be run.';
+  const gcloudResult = await gcloud.lint(args.join(' '));
+  if (gcloudResult.success === false) {
+    return gcloudResult.error;
   }
+  const cleanArgs = gcloudResult.parsedCommand.split(' ');
+
+  const command = {
+    tool: tool,
+    args: cleanArgs,
+  };
 
   return new Promise((resolve) => {
-    const executablePath = `/usr/bin/${tool}`;
-    const fullCommand = `${tool} ${args.join(' ')}`;
-
-    // Set up the environment for the child process.
-    const env: { [key: string]: string | undefined } = {
-        ...process.env,
-        CLOUDSDK_CORE_DISABLE_PROMPTS: '1',
-    };
-
-    // Set the access token for authentication. This tells gcloud to use the provided token.
-    // The `gcloud storage sign-url` command uses a different authentication flow and does not
-    // work with this environment variable, so we exclude it.
-    if (!fullCommand.includes('storage sign-url')) {
-        env.CLOUDSDK_AUTH_ACCESS_TOKEN = accessToken;
+    let stdout = '';
+    let stderr = '';
+    const env = { ...process.env };
+    if (configurable?.accessToken) {
+        env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = configurable.accessToken;
     }
+    const child = child_process.spawn(command.tool, command.args, {
+      env,
+    });
 
-    const child = spawn(executablePath, args, { env: env as any });
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
 
-    let output = '';
-    let error = '';
-    child.stdout.on('data', (data) => (output += data.toString()));
-    child.stderr.on('data', (data) => (error += data.toString()));
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
 
     child.on('close', (code) => {
-      if (code !== 0) {
-        // On error, return the stderr for the agent to analyze.
-        resolve(`Command failed with exit code ${code}. Stderr: ${error}`);
+      if (code === 0) {
+        resolve(stdout);
       } else {
-        // On success, return the stdout.
-        resolve(output);
+        resolve(stderr);
       }
     });
 
     // Handle errors where the process itself fails to start.
     child.on('error', (err) => {
-      resolve(`Failed to start the ${tool} process: ${err.message}`);
+      resolve(`Failed to start the ${command.tool} process: ${err.message}`);
     });
   });
 };
 
-export const googleCloudSdkTool = new DynamicTool({
-  name: 'google_cloud_sdk',
-  description: `
-      Executes a command for a Google Cloud command-line interface: gcloud, gsutil, kubectl, or bq.
-      The input must be a JSON string with two keys: 'tool' and 'args'.
-      The 'tool' key must be one of 'gcloud', 'gsutil', 'kubectl', or 'bq'.
-      The 'args' key must be an array of strings representing the command's arguments.
-      Example: To run 'gcloud compute instances list', the input should be '{"tool":"gcloud","args":["compute","instances","list"]}'.
-  `,
-  func: runGoogleCloudSdkCommand,
+export const googleCloudSdkTool = new StructuredTool({
+    name: 'google_cloud_sdk',
+    description: `Executes a command for a Google Cloud command-line interface: gcloud, gsutil, kubectl, or bq.`,
+    schema: z.object({
+        tool: z.enum(["gcloud", "gsutil", "kubectl", "bq"]).describe("The command-line tool to execute."),
+        args: z.array(z.string()).describe("The arguments for the command."),
+    }),
+    func: runGoogleCloudSdkCommand,
 });
