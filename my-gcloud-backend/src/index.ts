@@ -26,6 +26,8 @@ const prompt = ChatPromptTemplate.fromMessages([
         'system',
         `You are a helpful assistant who is an expert in Google Cloud. You have access to a tool that can execute Google Cloud command-line interface commands (gcloud, gsutil, kubectl, bq). 
         When a user asks for an action, use this tool to fulfill their request.
+
+        **CRITICAL INSTRUCTION**: After you have an Observation from a tool, you MUST either respond with a Final Answer OR another Action. You MUST NOT include both a Final Answer and an Action in the same response. 
         
         TOOLS:
         ------

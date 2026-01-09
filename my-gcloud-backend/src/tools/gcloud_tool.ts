@@ -83,6 +83,16 @@ class GoogleCloudSDK extends Tool {
             console.log('[GCLOUD_TOOL] Setting CLOUDSDK_AUTH_ACCESS_TOKEN in environment.');
             env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
         }
+
+        // ** THE DEFINITIVE FIX **
+        // Force gcloud to use the project specified in the command, overriding any environment defaults.
+        const projectIndex = command.args.findIndex(arg => arg === '--project');
+        if (projectIndex !== -1 && projectIndex + 1 < command.args.length) {
+            const projectId = command.args[projectIndex + 1];
+            console.log(`[GCLOUD_TOOL] Found --project flag. Forcing CLOUDSDK_CORE_PROJECT to: ${projectId}`);
+            env['CLOUDSDK_CORE_PROJECT'] = projectId;
+        }
+
         const child = child_process.spawn(command.tool, command.args, {
           env,
         });
