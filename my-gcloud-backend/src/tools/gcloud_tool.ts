@@ -55,6 +55,9 @@ class GoogleCloudSDK extends Tool {
       }
 
       const userAccessToken = config?.configurable?.userAccessToken;
+      // Added for diagnostics
+      console.log(`[GCLOUD_TOOL] Received userAccessToken: ${userAccessToken ? 'Exists' : 'Not Found'}`)
+
       const accessControlResult = accessControl.check(args.join(' '));
       if (accessControlResult.permitted === false) {
         return accessControlResult.message;
@@ -76,6 +79,8 @@ class GoogleCloudSDK extends Tool {
         let stderr = '';
         const env = { ...process.env };
         if (userAccessToken) {
+            // Added for diagnostics
+            console.log('[GCLOUD_TOOL] Setting CLOUDSDK_AUTH_ACCESS_TOKEN in environment.');
             env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
         }
         const child = child_process.spawn(command.tool, command.args, {
@@ -91,6 +96,12 @@ class GoogleCloudSDK extends Tool {
         });
     
         child.on('close', (code) => {
+          // Enhanced logging for diagnostics
+          console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Command: '${command.tool} ${command.args.join(' ')}'`);
+          console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Exit Code: ${code}`);
+          console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDOUT: ${stdout}`);
+          console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDERR: ${stderr}`);
+
           if (code === 0) {
             if (stdout.trim() === '') {
                 resolve("Command executed successfully and returned no output.");
@@ -98,6 +109,7 @@ class GoogleCloudSDK extends Tool {
                 resolve(stdout);
             }
           } else {
+            // Return the full STDERR on failure.
             resolve(`Error: Command failed with exit code ${code}. Stderr: ${stderr}`);
           }
         });
