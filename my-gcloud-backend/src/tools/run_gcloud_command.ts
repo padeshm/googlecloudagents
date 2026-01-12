@@ -8,6 +8,9 @@ const parameters = {
 
 // Define the Execution Logic
 const execute = async ({ command }: { command: string }) => {
+  // BUILD_MARKER: V3
+  console.log("[GCLOUD_TOOL_LOG] Executing run_gcloud_command.ts (V3)");
+
   // 1. Security Filter (CRITICAL)
   const DENY_LIST = [">", "|", "&", "sudo", "rm", "delete", "create", "update"]; // Adjusted for safety
   if (DENY_LIST.some((char) => command.includes(char))) {

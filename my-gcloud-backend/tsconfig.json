@@ -7,6 +7,7 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true
+    // BUILD_MARKER: V3
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules"]

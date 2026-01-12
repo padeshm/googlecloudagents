@@ -43,6 +43,8 @@ app.use(cors());
 app.use(express.json());
 
 async function startServer() {
+  // BUILD_MARKER: V3
+  console.log("[INDEX_LOG] Starting server with index.ts (V3)");
   // --- 3. Create the Agent and Executor (Updated to createToolCallingAgent) ---
   const agent = await createToolCallingAgent({ // CHANGED
     llm: model,
@@ -121,4 +123,5 @@ async function startServer() {
 }
 
 // Start the server
+// Triggering a rebuild
 startServer();
