@@ -45,8 +45,9 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V3
-      console.log("[GCLOUD_TOOL_LOG] Executing gcloud_tool.ts (V3)");
+      // BUILD_MARKER: V4
+      console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
+      console.log("[GCLOUD_TOOL_LOG] Executing gcloud_tool.ts (V4)");
 
       const allArgs = commandString.trim().split(' ');
       const tool = allArgs[0];
