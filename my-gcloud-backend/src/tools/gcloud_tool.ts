@@ -45,9 +45,8 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V4
+      // BUILD_MARKER: V5 - Final Fix
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
-      console.log("[GCLOUD_TOOL_LOG] Executing gcloud_tool.ts (V4)");
 
       const allArgs = commandString.trim().split(' ');
       const tool = allArgs[0];
@@ -58,8 +57,20 @@ class GoogleCloudSDK extends Tool {
       }
 
       const userAccessToken = config?.configurable?.userAccessToken;
-      // Added for diagnostics
-      console.log(`[GCLOUD_TOOL] Received userAccessToken: ${userAccessToken ? 'Exists' : 'Not Found'}`)
+      const env = { ...process.env };
+      if (userAccessToken) {
+          console.log('[GCLOUD_TOOL] Setting CLOUDSDK_AUTH_ACCESS_TOKEN in environment.');
+          env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
+      }
+
+      // ** THE DEFINITIVE FIX **
+      // Check the original args for the project flag before linting.
+      const projectIndex = args.findIndex(arg => arg === '--project');
+      if (projectIndex !== -1 && projectIndex + 1 < args.length) {
+          const projectId = args[projectIndex + 1];
+          console.log(`[GCLOUD_TOOL] Found --project flag on initial args. Forcing CLOUDSDK_CORE_PROJECT to: ${projectId}`);
+          env['CLOUDSDK_CORE_PROJECT'] = projectId;
+      }
 
       const accessControlResult = accessControl.check(args.join(' '));
       if (accessControlResult.permitted === false) {
@@ -80,24 +91,9 @@ class GoogleCloudSDK extends Tool {
       return new Promise((resolve) => {
         let stdout = '';
         let stderr = '';
-        const env = { ...process.env };
-        if (userAccessToken) {
-            // Added for diagnostics
-            console.log('[GCLOUD_TOOL] Setting CLOUDSDK_AUTH_ACCESS_TOKEN in environment.');
-            env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
-        }
-
-        // ** THE DEFINITIVE FIX **
-        // Force gcloud to use the project specified in the command, overriding any environment defaults.
-        const projectIndex = command.args.findIndex(arg => arg === '--project');
-        if (projectIndex !== -1 && projectIndex + 1 < command.args.length) {
-            const projectId = command.args[projectIndex + 1];
-            console.log(`[GCLOUD_TOOL] Found --project flag. Forcing CLOUDSDK_CORE_PROJECT to: ${projectId}`);
-            env['CLOUDSDK_CORE_PROJECT'] = projectId;
-        }
 
         const child = child_process.spawn(command.tool, command.args, {
-          env,
+          env, // Use the pre-configured env object
         });
     
         child.stdout.on('data', (data) => {
@@ -109,7 +105,6 @@ class GoogleCloudSDK extends Tool {
         });
     
         child.on('close', (code) => {
-          // Enhanced logging for diagnostics
           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Command: '${command.tool} ${command.args.join(' ')}'`);
           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Exit Code: ${code}`);
           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDOUT: ${stdout}`);
@@ -122,12 +117,10 @@ class GoogleCloudSDK extends Tool {
                 resolve(stdout);
             }
           } else {
-            // Return the full STDERR on failure.
             resolve(`Error: Command failed with exit code ${code}. Stderr: ${stderr}`);
           }
         });
     
-        // Handle errors where the process itself fails to start.
         child.on('error', (err) => {
           resolve(`Failed to start the ${command.tool} process: ${err.message}`);
         });
