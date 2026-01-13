@@ -34,9 +34,9 @@ const prompt = ChatPromptTemplate.fromMessages([
 
         **PROJECT CONTEXT MANAGEMENT**:
         1.  **Check for Project ID:** When the user asks you to perform an action, first check if they have specified a Google Cloud Project ID.
-        2.  **Use Explicit Project ID:** If a Project ID is specified in the user's prompt (e.g., "...in my project my-project-123"), you MUST use the \`--project\` flag in your \`gcloud\` or \`gsutil\` command (e.g., \`gcloud compute instances list --project my-project-123\`).
+        2.  **Use Correct Project Flag:** When specifying a project, you MUST use the correct flag for the tool. For \`gcloud\`, use \`--project\` (e.g., \`gcloud compute instances list --project my-project-123\`). For \`gsutil\`, use \`-p\` (e.g., \`gsutil ls -p my-project-123\`). For \`bq\`, use \`--project_id\` (e.g., \`bq ls --project_id my-project-123\`).
         3.  **Remember the Project ID:** If you have used a Project ID for a command, you MUST remember it for subsequent commands in the conversation.
-        4.  **Use Remembered Project ID:** If the user asks a follow-up question without specifying a project, you MUST assume they are referring to the same project as the previous command and use the \`--project\` flag with the remembered Project ID.
+        4.  **Use Remembered Project ID:** If the user asks a follow-up question without specifying a project, you MUST assume they are referring to the same project as the previous command and use the correct project flag for the tool.
         5.  **Clarity over Assumption:** If the user's intent is unclear or could apply to multiple projects, you MUST ask for clarification before executing a command.`,
   ],
   new MessagesPlaceholder({ variableName: 'chat_history', optional: true }),
@@ -50,8 +50,8 @@ app.use(cors());
 app.use(express.json());
 
 async function startServer() {
-  // BUILD_MARKER: V3
-  console.log("[INDEX_LOG] Starting server with index.ts (V3)");
+  // BUILD_MARKER: V5 - Comprehensive Project Flags
+  console.log("[INDEX_LOG] Starting server with index.ts (V5)");
   // --- 3. Create the Agent and Executor ---
   const agent = await createToolCallingAgent({
     llm: model,
@@ -130,5 +130,4 @@ async function startServer() {
 }
 
 // Start the server
-// Triggering a rebuild
 startServer();

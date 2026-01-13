@@ -45,7 +45,7 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V6 - Linter Removed
+      // BUILD_MARKER: V8 - Comprehensive Project Flag Support
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       const allArgs = commandString.trim().split(' ');
@@ -63,10 +63,33 @@ class GoogleCloudSDK extends Tool {
           env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
       }
 
+      // ** THE DEFINITIVE FIX V4 - Comprehensive **
+      // Find the project ID from `--project`, `-p`, or `--project_id` flags.
+      let projectId = '';
       const projectIndex = args.findIndex(arg => arg === '--project');
+      const pIndex = args.findIndex(arg => arg === '-p');
+      const bqIndex = args.findIndex(arg => arg.startsWith('--project_id')); // Handles '--project_id=...' and '--project_id ...'
+
       if (projectIndex !== -1 && projectIndex + 1 < args.length) {
-          const projectId = args[projectIndex + 1];
-          console.log(`[GCLOUD_TOOL] Found --project flag on initial args. Forcing CLOUDSDK_CORE_PROJECT to: ${projectId}`);
+          projectId = args[projectIndex + 1];
+          console.log(`[GCLOUD_TOOL] Found --project flag. Using project: ${projectId}`);
+      } else if (pIndex !== -1 && pIndex + 1 < args.length) {
+          projectId = args[pIndex + 1];
+          console.log(`[GCLOUD_TOOL] Found -p flag. Using project: ${projectId}`);
+      } else if (bqIndex !== -1) {
+          const bqArg = args[bqIndex];
+          if (bqArg.includes('=')) {
+              projectId = bqArg.split('=')[1];
+          } else if (bqIndex + 1 < args.length) {
+              projectId = args[bqIndex + 1];
+          }
+          if(projectId) {
+              console.log(`[GCLOUD_TOOL] Found --project_id flag. Using project: ${projectId}`);
+          }
+      }
+
+      if (projectId) {
+          console.log(`[GCLOUD_TOOL] Forcing CLOUDSDK_CORE_PROJECT to: ${projectId}`);
           env['CLOUDSDK_CORE_PROJECT'] = projectId;
       }
 
@@ -75,12 +98,8 @@ class GoogleCloudSDK extends Tool {
         return accessControlResult.message;
       }
     
-      // --- LINTER REMOVED ---
-      // The gcloud.lint() step was interfering with the --project flag and is the root cause of the issue.
-      // Bypassing it for direct execution.
-      console.log('[GCLOUD_TOOL] Bypassing linter and using raw arguments.');
+      // Linter has been removed.
       const cleanArgs = args;
-      // --- END LINTER REMOVAL ---
     
       const command = {
         tool: tool,
