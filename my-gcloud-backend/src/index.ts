@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { ChatVertexAI } from '@langchain/google-vertexai';
-import { AgentExecutor, createToolCallingAgent } from 'langchain/agents'; // CHANGED
+import { AgentExecutor, createToolCallingAgent } from 'langchain/agents';
 import {
   ChatPromptTemplate,
   MessagesPlaceholder,
@@ -17,24 +17,31 @@ interface HistoryMessage {
 
 // --- 1. Initialize Model and Tools ---
 const model = new ChatVertexAI({
-  model: 'gemini-2.5-pro', // CORRECT MODEL PRESERVED
+  model: 'gemini-2.5-pro',
   temperature: 0,
 });
 
 const tools = [googleCloudSdkTool];
 
-// --- 2. Create the Agent Prompt (Updated for the new agent type) ---
+// --- 2. Create the Agent Prompt ---
 const prompt = ChatPromptTemplate.fromMessages([
   [
     'system',
-    `You are a helpful assistant who is an expert in Google Cloud. You have access to a tool that can execute Google Cloud command-line interface commands (gcloud, gsutil, kubectl, bq). 
+    `You are a helpful assistant who is an expert in Google Cloud. You have access to a tool that can execute Google Cloud command-line interface commands (gcloud, gsutil, kubectl, bq).
         When a user asks for an action, use this tool to fulfill their request.
 
-        **CRITICAL INSTRUCTION**: After you have an Observation from a tool, you MUST either respond with a Final Answer OR another Action. You MUST NOT include both a Final Answer and an Action in the same response.`,
+        **CRITICAL INSTRUCTION**: After you have an Observation from a tool, you MUST either respond with a Final Answer OR another Action. You MUST NOT include both a Final Answer and an Action in the same response.
+
+        **PROJECT CONTEXT MANAGEMENT**:
+        1.  **Check for Project ID:** When the user asks you to perform an action, first check if they have specified a Google Cloud Project ID.
+        2.  **Use Explicit Project ID:** If a Project ID is specified in the user's prompt (e.g., "...in my project my-project-123"), you MUST use the \`--project\` flag in your \`gcloud\` or \`gsutil\` command (e.g., \`gcloud compute instances list --project my-project-123\`).
+        3.  **Remember the Project ID:** If you have used a Project ID for a command, you MUST remember it for subsequent commands in the conversation.
+        4.  **Use Remembered Project ID:** If the user asks a follow-up question without specifying a project, you MUST assume they are referring to the same project as the previous command and use the \`--project\` flag with the remembered Project ID.
+        5.  **Clarity over Assumption:** If the user's intent is unclear or could apply to multiple projects, you MUST ask for clarification before executing a command.`,
   ],
   new MessagesPlaceholder({ variableName: 'chat_history', optional: true }),
   ['human', '{input}'],
-  new MessagesPlaceholder('agent_scratchpad'), // agent_scratchpad is now a placeholder for the new agent
+  new MessagesPlaceholder('agent_scratchpad'),
 ]);
 
 // --- 4. Set up the Express Server ---
@@ -45,8 +52,8 @@ app.use(express.json());
 async function startServer() {
   // BUILD_MARKER: V3
   console.log("[INDEX_LOG] Starting server with index.ts (V3)");
-  // --- 3. Create the Agent and Executor (Updated to createToolCallingAgent) ---
-  const agent = await createToolCallingAgent({ // CHANGED
+  // --- 3. Create the Agent and Executor ---
+  const agent = await createToolCallingAgent({
     llm: model,
     tools,
     prompt,
@@ -55,10 +62,10 @@ async function startServer() {
   const agentExecutor = new AgentExecutor({
     agent,
     tools,
-    verbose: false, // This is the change you approved
+    verbose: false,
   });
 
-  // --- 5. Define the API Endpoint (Logic remains the same)---
+  // --- 5. Define the API Endpoint ---
   app.post('/api/gcloud', async (req: Request, res: Response) => {
     console.log(`--- NEW GCLOUD-BACKEND REQUEST ---`);
     console.log(`[REQUEST_BODY]: ${JSON.stringify(req.body)}`);
