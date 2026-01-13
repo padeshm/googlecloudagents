@@ -30,6 +30,9 @@ RUN curl -O ${GCLOUD_SDK_URL} && \
 # Add gcloud to the PATH for all future sessions (good practice)
 ENV PATH /google-cloud-sdk/bin:$PATH
 
+# Install the GKE auth plugin
+RUN gcloud components install gke-gcloud-auth-plugin --quiet
+
 # 3. Application Setup
 WORKDIR /app
 

@@ -39,8 +39,9 @@ const prompt = ChatPromptTemplate.fromMessages([
         - **Example:** If you know from a previous call that instance 'foo' is in 'us-central1-a', a command to get its details MUST be \`gcloud compute instances describe foo --zone us-central1-a\`.
 
         **2. Project Context Management:**
-        - If a Project ID is specified, you MUST use the correct flag for the tool: \`--project\` for \`gcloud\`, \`-p\` for \`gsutil\`, and \`--project_id\` for \`bq\`.
-        - You MUST remember the last-used Project ID for subsequent commands in the conversation.
+        - **Priority:** The user's explicitly stated project in the current prompt ALWAYS takes precedence.
+        - If a Project ID is specified, you MUST use it with the correct flag for the tool: \`--project\` for \`gcloud\`, \`-p\` for \`gsutil\`, and \`--project_id\` for \`bq\`.
+        - You MUST remember the last-used Project ID for subsequent commands, but you must switch if the user specifies a new one.
 
         **3. User-Centric Actions (Be Helpful, Not Literal):**
         - When a user asks to "download" or "get" a file from a Cloud Storage bucket, they want to download it to their own computer. Do NOT use \`gsutil cp\` to download it to your local environment.
@@ -76,8 +77,8 @@ app.use(cors());
 app.use(express.json());
 
 async function startServer() {
-  // BUILD_MARKER: V9 - FINAL, CORRECTED AGENT BRAIN
-  console.log("[INDEX_LOG] Starting server with index.ts (V9)");
+  // BUILD_MARKER: V10 - GKE Auth Plugin Fix & Final Prompt Tweak
+  console.log("[INDEX_LOG] Starting server with index.ts (V10)");
   // --- 3. Create the Agent and Executor (Updated to createToolCallingAgent) ---
   const agent = await createToolCallingAgent({ // CHANGED
     llm: model,
