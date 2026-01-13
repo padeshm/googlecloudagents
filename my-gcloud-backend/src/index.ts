@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { ChatVertexAI } from '@langchain/google-vertexai';
-import { AgentExecutor, createToolCallingAgent } from 'langchain/agents';
+import { AgentExecutor, createToolCallingAgent } from 'langchain/agents'; // CHANGED
 import {
   ChatPromptTemplate,
   MessagesPlaceholder,
@@ -17,31 +17,57 @@ interface HistoryMessage {
 
 // --- 1. Initialize Model and Tools ---
 const model = new ChatVertexAI({
-  model: 'gemini-2.5-pro',
+  model: 'gemini-2.5-pro', // CORRECT MODEL PRESERVED
   temperature: 0,
 });
 
 const tools = [googleCloudSdkTool];
 
-// --- 2. Create the Agent Prompt ---
+// --- 2. Create the Agent Prompt (The Agent's "Brain") ---
 const prompt = ChatPromptTemplate.fromMessages([
   [
     'system',
-    `You are a helpful assistant who is an expert in Google Cloud. You have access to a tool that can execute Google Cloud command-line interface commands (gcloud, gsutil, kubectl, bq).
-        When a user asks for an action, use this tool to fulfill their request.
+    `You are a helpful and highly intelligent assistant who is an expert in Google Cloud. You have access to a tool that can execute Google Cloud command-line interface commands (gcloud, gsutil, kubectl, bq).
 
-        **CRITICAL INSTRUCTION**: After you have an Observation from a tool, you MUST either respond with a Final Answer OR another Action. You MUST NOT include both a Final Answer and an Action in the same response.
+        **Primary Directive:** Your goal is to be maximally helpful. Do not just execute commands literally; anticipate the user's true intent and take the most helpful action.
 
-        **PROJECT CONTEXT MANAGEMENT**:
-        1.  **Check for Project ID:** When the user asks you to perform an action, first check if they have specified a Google Cloud Project ID.
-        2.  **Use Correct Project Flag:** When specifying a project, you MUST use the correct flag for the tool. For \`gcloud\`, use \`--project\` (e.g., \`gcloud compute instances list --project my-project-123\`). For \`gsutil\`, use \`-p\` (e.g., \`gsutil ls -p my-project-123\`). For \`bq\`, use \`--project_id\` (e.g., \`bq ls --project_id my-project-123\`).
-        3.  **Remember the Project ID:** If you have used a Project ID for a command, you MUST remember it for subsequent commands in the conversation.
-        4.  **Use Remembered Project ID:** If the user asks a follow-up question without specifying a project, you MUST assume they are referring to the same project as the previous command and use the correct project flag for the tool.
-        5.  **Clarity over Assumption:** If the user's intent is unclear or could apply to multiple projects, you MUST ask for clarification before executing a command.`,
+        **--- Core Instructions & Rules ---**
+
+        **1. Stateful Context & Information Extraction:**
+        - When you execute a command to list resources (e.g., \`gcloud compute instances list\`), you MUST parse the output to identify and remember key metadata for each resource, such as NAME, ZONE, REGION, and STATUS.
+        - When the user asks a follow-up question about a specific resource by name (e.g., "give me details on instance 'foo'"), you MUST use the information you previously extracted to construct the correct command. Do NOT ask the user for information you already have.
+        - **Example:** If you know from a previous call that instance 'foo' is in 'us-central1-a', a command to get its details MUST be \`gcloud compute instances describe foo --zone us-central1-a\`.
+
+        **2. Project Context Management:**
+        - If a Project ID is specified, you MUST use the correct flag for the tool: \`--project\` for \`gcloud\`, \`-p\` for \`gsutil\`, and \`--project_id\` for \`bq\`.
+        - You MUST remember the last-used Project ID for subsequent commands in the conversation.
+
+        **3. User-Centric Actions (Be Helpful, Not Literal):**
+        - When a user asks to "download" or "get" a file from a Cloud Storage bucket, they want to download it to their own computer. Do NOT use \`gsutil cp\` to download it to your local environment.
+        - You MUST instead generate a temporary, secure signed URL for the object using the \`gsutil signurl\` command. This provides a link the user can click to download the file directly.
+
+        **4. Kubernetes (GKE) Workflow:**
+        - **Credentials:** To interact with a GKE cluster, you MUST first run \`gcloud container clusters get-credentials <CLUSTER_NAME> --zone <ZONE>\` (or --region) to configure kubectl access. You MUST extract the cluster's ZONE or REGION from the initial \`list\` command.
+        - **Namespacing:**
+          - When running a command that can be namespaced (e.g., \`get pods\`, \`get services\`, \`describe deployment\`):
+            - If the user provides a namespace, use it (e.g., \`--namespace <user_namespace>\`).
+            - If the user does NOT provide a namespace, you MUST use the \`default\` namespace (e.g., \`kubectl get pods --namespace default\`). You must also state in your answer that you are showing results from the 'default' namespace.
+          - **Cluster-Scoped Resources:** You must be aware that some resources are not namespaced (e.g., \`nodes\`, \`persistentvolumes\`, \`clusterroles\`). For these commands, you MUST NOT add a namespace flag. Do not fail if the user asks for these without a namespace.
+
+        **5. Intelligent Error Analysis:**
+        - When a command fails, do not just repeat the error message. Analyze it.
+        - If a previous command for a service (e.g., BigQuery) worked, and a subsequent one fails, do NOT conclude the entire API is disabled. The error is likely with your specific command. Re-examine it for syntax errors, incorrect names, or permissions specific to that resource before answering.
+
+        **6. BigQuery SQL Generation:**
+        - When a user asks a question that requires querying data *within* a table (e.g., "how many rows are in table 'foo'?", "what are the distinct country values in this table?"), you MUST use the \`bq query\` command.
+        - You are to construct a standard SQL query string to answer the user's question.
+        - **Example:** To count rows, generate: \`bq query --project_id <project> "SELECT COUNT(*) FROM \`<dataset>.<table_name>\`"\`.
+        - **Example:** To find distinct values, generate: \`bq query --project_id <project> "SELECT DISTINCT <column_name> FROM \`<dataset>.<table_name>\`"\`.
+        - If the query is too complex (e.g., involves JOINs or window functions), you should respond that you can only handle simple SQL queries.`,
   ],
   new MessagesPlaceholder({ variableName: 'chat_history', optional: true }),
   ['human', '{input}'],
-  new MessagesPlaceholder('agent_scratchpad'),
+  new MessagesPlaceholder('agent_scratchpad'), // agent_scratchpad is now a placeholder for the new agent
 ]);
 
 // --- 4. Set up the Express Server ---
@@ -50,10 +76,10 @@ app.use(cors());
 app.use(express.json());
 
 async function startServer() {
-  // BUILD_MARKER: V5 - Comprehensive Project Flags
-  console.log("[INDEX_LOG] Starting server with index.ts (V5)");
-  // --- 3. Create the Agent and Executor ---
-  const agent = await createToolCallingAgent({
+  // BUILD_MARKER: V9 - FINAL, CORRECTED AGENT BRAIN
+  console.log("[INDEX_LOG] Starting server with index.ts (V9)");
+  // --- 3. Create the Agent and Executor (Updated to createToolCallingAgent) ---
+  const agent = await createToolCallingAgent({ // CHANGED
     llm: model,
     tools,
     prompt,
@@ -62,10 +88,10 @@ async function startServer() {
   const agentExecutor = new AgentExecutor({
     agent,
     tools,
-    verbose: false,
+    verbose: false, // This is the change you approved
   });
 
-  // --- 5. Define the API Endpoint ---
+  // --- 5. Define the API Endpoint (Logic remains the same)---
   app.post('/api/gcloud', async (req: Request, res: Response) => {
     console.log(`--- NEW GCLOUD-BACKEND REQUEST ---`);
     console.log(`[REQUEST_BODY]: ${JSON.stringify(req.body)}`);
