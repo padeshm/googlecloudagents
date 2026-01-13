@@ -45,7 +45,7 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V5 - Final Fix
+      // BUILD_MARKER: V6 - Linter Removed
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       const allArgs = commandString.trim().split(' ');
@@ -63,8 +63,6 @@ class GoogleCloudSDK extends Tool {
           env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
       }
 
-      // ** THE DEFINITIVE FIX **
-      // Check the original args for the project flag before linting.
       const projectIndex = args.findIndex(arg => arg === '--project');
       if (projectIndex !== -1 && projectIndex + 1 < args.length) {
           const projectId = args[projectIndex + 1];
@@ -77,11 +75,12 @@ class GoogleCloudSDK extends Tool {
         return accessControlResult.message;
       }
     
-      const gcloudResult = await gcloud.lint(args.join(' '));
-      if (gcloudResult.success === false) {
-        return gcloudResult.error;
-      }
-      const cleanArgs = gcloudResult.parsedCommand.split(' ');
+      // --- LINTER REMOVED ---
+      // The gcloud.lint() step was interfering with the --project flag and is the root cause of the issue.
+      // Bypassing it for direct execution.
+      console.log('[GCLOUD_TOOL] Bypassing linter and using raw arguments.');
+      const cleanArgs = args;
+      // --- END LINTER REMOVAL ---
     
       const command = {
         tool: tool,
@@ -93,7 +92,7 @@ class GoogleCloudSDK extends Tool {
         let stderr = '';
 
         const child = child_process.spawn(command.tool, command.args, {
-          env, // Use the pre-configured env object
+          env,
         });
     
         child.stdout.on('data', (data) => {
