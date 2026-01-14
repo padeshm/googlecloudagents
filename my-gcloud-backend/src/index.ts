@@ -44,11 +44,12 @@ const prompt = ChatPromptTemplate.fromMessages([
         - You MUST remember the last-used Project ID for subsequent commands, but you must switch if the user specifies a new one.
 
         **3. Signed URL Generation (\`gcloud storage sign-url\`)**
-        - When a user asks to "download" or "get" a file, you MUST generate a signed URL using a two-step process. This is required because you are using impersonation.
-        - **Step 1 (Tool: \`gcloud auth list\`):** First, you MUST run \`gcloud auth list\` to identify the service account you are impersonating. The output will contain a line with the service account email.
-        - **Step 2 (Tool: \`gcloud storage sign-url\`):** Parse the email from Step 1. Then, construct and run the \`gcloud storage sign-url\` command. You MUST use the \`--impersonate-service-account\` flag with the email you found.
-        - **Correct Example (Step 2):** \`gcloud storage sign-url gs://<bucket>/<object> --impersonate-service-account=<parsed_email_from_step_1> --duration=10m\`
-
+        - When a user asks to "download" or "get" a file, you MUST generate a signed URL using the server's built-in credentials.
+        - You MUST NOT run \`gcloud auth list\` for this purpose.
+        - You MUST NOT use the \`--impersonate-service-account\` flag.
+        - **Correct Command:** Simply construct the command with the bucket and object path.
+        - **Example:** \`gcloud storage sign-url gs://<bucket>/<object> --duration=10m\`
+        - The system's environment is correctly configured to handle the signing automatically.
 
         **4. Kubernetes (GKE) Workflow:**
         - **Credentials:** To interact with a GKE cluster, you MUST first run \`gcloud container clusters get-credentials <CLUSTER_NAME> --zone <ZONE>\` (or --region) to configure kubectl access. You MUST extract the cluster's ZONE or REGION from the initial \`list\` command.
@@ -80,8 +81,8 @@ app.use(cors());
 app.use(express.json());
 
 async function startServer() {
-  // BUILD_MARKER: V10 - GKE Auth Plugin Fix & Final Prompt Tweak
-  console.log("[INDEX_LOG] Starting server with index.ts (V10)");
+  // BUILD_MARKER: V15 - Definitive Fix for sign-url context
+  console.log("[INDEX_LOG] Starting server with index.ts (V15)");
   // --- 3. Create the Agent and Executor (Updated to createToolCallingAgent) ---
   const agent = await createToolCallingAgent({ // CHANGED
     llm: model,

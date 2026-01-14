@@ -45,7 +45,7 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V8 - Comprehensive Project Flag Support
+      // BUILD_MARKER: V15 - Definitive Fix for sign-url context
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       const allArgs = commandString.trim().split(' ');
@@ -58,9 +58,18 @@ class GoogleCloudSDK extends Tool {
 
       const userAccessToken = config?.configurable?.userAccessToken;
       const env = { ...process.env };
-      if (userAccessToken) {
-          console.log('[GCLOUD_TOOL] Setting CLOUDSDK_AUTH_ACCESS_TOKEN in environment.');
+      
+      // ** THE DEFINITIVE FIX V5 - Context Switching **
+      // For sign-url, we MUST use the application's default credentials (the service account)
+      // and NOT impersonate the user. For all other commands, we impersonate the user.
+      const isSignUrlCommand = commandString.includes('gcloud storage sign-url');
+
+      if (userAccessToken && !isSignUrlCommand) {
+          console.log('[GCLOUD_TOOL] Impersonation active: Setting CLOUDSDK_AUTH_ACCESS_TOKEN in environment.');
           env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
+      } else if (isSignUrlCommand) {
+          console.log('[GCLOUD_TOOL] Impersonation bypassed: Using application default credentials for sign-url.');
+          // By not setting the token, gcloud will fall back to the attached service account.
       }
 
       // ** THE DEFINITIVE FIX V4 - Comprehensive **
