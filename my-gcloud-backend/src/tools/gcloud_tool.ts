@@ -24,6 +24,7 @@ import * as gcloud from '../gcloud';
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { CallbackManagerForToolRun } from "@langchain/core/callbacks/manager";
 
+let lastKnownProjectId = ''; // Add stateful variable for project ID
 
 // Denylist any command that is interactive or requires a TTY.
 // These commands will hang the process.
@@ -45,7 +46,7 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V16 - Robust Context Switching
+      // BUILD_MARKER: V17 - Stateful Project Context
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       const allArgs = commandString.trim().split(' ');
@@ -61,23 +62,20 @@ class GoogleCloudSDK extends Tool {
       
       const isSignUrlCommand = commandString.includes('gcloud storage sign-url');
 
-      // The logic is now inverted to be safer.
-      // 1. First, check for the special case.
+      // Logic to handle impersonation context
       if (isSignUrlCommand) {
         console.log('[GCLOUD_TOOL] Impersonation bypassed for sign-url. Using application default credentials.');
-        // By not setting the token, gcloud will fall back to the attached service account.
       } 
-      // 2. For ALL other commands, apply the original impersonation logic.
       else if (userAccessToken) {
         console.log('[GCLOUD_TOOL] Impersonation active: Setting CLOUDSDK_AUTH_ACCESS_TOKEN in environment.');
         env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
       }
 
-      // Find the project ID from `--project`, `-p`, or `--project_id` flags.
+      // Find the project ID from command flags.
       let projectId = '';
       const projectIndex = args.findIndex(arg => arg === '--project');
       const pIndex = args.findIndex(arg => arg === '-p');
-      const bqIndex = args.findIndex(arg => arg.startsWith('--project_id')); // Handles '--project_id=...' and '--project_id ...'
+      const bqIndex = args.findIndex(arg => arg.startsWith('--project_id'));
 
       if (projectIndex !== -1 && projectIndex + 1 < args.length) {
           projectId = args[projectIndex + 1];
@@ -97,9 +95,16 @@ class GoogleCloudSDK extends Tool {
           }
       }
 
+      // ** THE DEFINITIVE FIX V6 - Stateful Project Context **
+      // If a project is found, use it and remember it.
+      // If no project is found, use the last remembered project.
       if (projectId) {
-          console.log(`[GCLOUD_TOOL] Forcing CLOUDSDK_CORE_PROJECT to: ${projectId}`);
-          env['CLOUDSDK_CORE_PROJECT'] = projectId;
+        console.log(`[GCLOUD_TOOL] Forcing CLOUDSDK_CORE_PROJECT to: ${projectId}`);
+        env['CLOUDSDK_CORE_PROJECT'] = projectId;
+        lastKnownProjectId = projectId; // Remember the project for subsequent calls
+      } else if (lastKnownProjectId) {
+        console.log(`[GCLOUD_TOOL] No project flag in command, using last known project: ${lastKnownProjectId}`);
+        env['CLOUDSDK_CORE_PROJECT'] = lastKnownProjectId;
       }
 
       const accessControlResult = accessControl.check(args.join(' '));
