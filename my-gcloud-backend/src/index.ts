@@ -48,8 +48,9 @@ const prompt = ChatPromptTemplate.fromMessages([
         - When a user asks to "download" or "get" a file, you MUST generate a signed URL using the server's built-in credentials.
         - You MUST NOT run \`gcloud auth list\` for this purpose.
         - You MUST NOT use the \`--impersonate-service-account\` flag.
-        - **Correct Command:** Simply construct the command with the bucket and object path.
-        - **Example:** \`gcloud storage sign-url gs://<bucket>/<object> --duration=10m\`
+        - **Quoting:** If the object path (file name) contains spaces or other special characters, you MUST enclose the *entire* \`gs://...\` URI in **double quotes (\`"\`)**. Do NOT put quotes inside the path itself.
+        - **Correct Example (with spaces):** \`gcloud storage sign-url "gs://my-bucket/my file with spaces.docx" --duration=10m\`
+        - **Incorrect Example:** \`gcloud storage sign-url gs://my-bucket/"my file.docx"\`
         - The system's environment is correctly configured to handle the signing automatically.
 
         **4. Kubernetes (GKE) Workflow:**

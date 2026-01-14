@@ -1,3 +1,4 @@
+'''
 /**
  * Copyright 2025 Google LLC
  *
@@ -46,12 +47,34 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V17 - Stateful Project Context
+      // BUILD_MARKER: V18 - Smart Parser for bq query
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
-      const allArgs = commandString.trim().split(' ');
-      const tool = allArgs[0];
-      const args = allArgs.slice(1);
+      let tool: string;
+      let args: string[];
+
+      // The simple .split(' ') is not robust enough for commands that contain
+      // quoted arguments with spaces, like `bq query 'SELECT ...'`.
+      // We need to special-case `bq query` to handle this.
+      if (commandString.startsWith('bq query')) {
+        console.log('[GCLOUD_TOOL] bq query detected. Using smart parser.');
+        const sqlQueryIndex = commandString.indexOf("'");
+        if (sqlQueryIndex === -1) {
+          // Fallback for malformed bq query command without single quotes
+          [tool, ...args] = commandString.trim().split(' ');
+        } else {
+          const preQueryString = commandString.substring(0, sqlQueryIndex).trim();
+          // The SQL query is the rest of the string, preserving quotes.
+          const sqlQuery = commandString.substring(sqlQueryIndex);
+          
+          const preQueryArgs = preQueryString.split(' ').filter(arg => arg.length > 0);
+          tool = preQueryArgs[0];
+          args = [...preQueryArgs.slice(1), sqlQuery];
+        }
+      } else {
+        // For all other commands, the simple split is sufficient.
+        [tool, ...args] = commandString.trim().split(' ');
+      }
 
       if (!["gcloud", "gsutil", "kubectl", "bq"].includes(tool)) {
         return `Error: Invalid tool '${tool}'. The first word of the command must be one of gcloud, gsutil, kubectl, or bq.`;
@@ -95,9 +118,7 @@ class GoogleCloudSDK extends Tool {
           }
       }
 
-      // ** THE DEFINITIVE FIX V6 - Stateful Project Context **
-      // If a project is found, use it and remember it.
-      // If no project is found, use the last remembered project.
+      // Stateful Project Context
       if (projectId) {
         console.log(`[GCLOUD_TOOL] Forcing CLOUDSDK_CORE_PROJECT to: ${projectId}`);
         env['CLOUDSDK_CORE_PROJECT'] = projectId;
@@ -125,6 +146,7 @@ class GoogleCloudSDK extends Tool {
 
         const child = child_process.spawn(command.tool, command.args, {
           env,
+          shell: true // Using shell to correctly handle quoted arguments
         });
     
         child.stdout.on('data', (data) => {
@@ -160,3 +182,4 @@ class GoogleCloudSDK extends Tool {
 }
 
 export const googleCloudSdkTool = new GoogleCloudSDK();
+'''
