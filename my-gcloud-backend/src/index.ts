@@ -50,10 +50,11 @@ const prompt = ChatPromptTemplate.fromMessages([
 
         **4. Signed URL Generation (\`gcloud storage sign-url\`)**
         - When a user asks to "download" or "get" a file, you MUST generate a signed URL using the server's built-in credentials.
+        - You MUST include the \`--project <project_id>\` flag in the command, using the project you know from context. This is essential for authentication.
         - You MUST NOT run \`gcloud auth list\` for this purpose.
         - You MUST NOT use the \`--impersonate-service-account\` flag.
         - **Quoting:** If the object path (file name) contains spaces or other special characters, you MUST enclose the *entire* \`gs://...\` URI in **double quotes (\`"\`)**. Do NOT put quotes inside the path itself.
-        - **Correct Example (with spaces):** \`gcloud storage sign-url "gs://my-bucket/my file with spaces.docx" --duration=10m\`
+        - **Correct Example (with spaces):** \`gcloud storage sign-url "gs://my-bucket/my file with spaces.docx" --project <project_id> --duration=10m\`
         - **Incorrect Example:** \`gcloud storage sign-url gs://my-bucket/"my file.docx"\`
         - The system's environment is correctly configured to handle the signing automatically.
 
