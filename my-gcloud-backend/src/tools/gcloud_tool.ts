@@ -45,7 +45,7 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V15 - Definitive Fix for sign-url context
+      // BUILD_MARKER: V16 - Robust Context Switching
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       const allArgs = commandString.trim().split(' ');
@@ -59,20 +59,20 @@ class GoogleCloudSDK extends Tool {
       const userAccessToken = config?.configurable?.userAccessToken;
       const env = { ...process.env };
       
-      // ** THE DEFINITIVE FIX V5 - Context Switching **
-      // For sign-url, we MUST use the application's default credentials (the service account)
-      // and NOT impersonate the user. For all other commands, we impersonate the user.
       const isSignUrlCommand = commandString.includes('gcloud storage sign-url');
 
-      if (userAccessToken && !isSignUrlCommand) {
-          console.log('[GCLOUD_TOOL] Impersonation active: Setting CLOUDSDK_AUTH_ACCESS_TOKEN in environment.');
-          env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
-      } else if (isSignUrlCommand) {
-          console.log('[GCLOUD_TOOL] Impersonation bypassed: Using application default credentials for sign-url.');
-          // By not setting the token, gcloud will fall back to the attached service account.
+      // The logic is now inverted to be safer.
+      // 1. First, check for the special case.
+      if (isSignUrlCommand) {
+        console.log('[GCLOUD_TOOL] Impersonation bypassed for sign-url. Using application default credentials.');
+        // By not setting the token, gcloud will fall back to the attached service account.
+      } 
+      // 2. For ALL other commands, apply the original impersonation logic.
+      else if (userAccessToken) {
+        console.log('[GCLOUD_TOOL] Impersonation active: Setting CLOUDSDK_AUTH_ACCESS_TOKEN in environment.');
+        env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
       }
 
-      // ** THE DEFINITIVE FIX V4 - Comprehensive **
       // Find the project ID from `--project`, `-p`, or `--project_id` flags.
       let projectId = '';
       const projectIndex = args.findIndex(arg => arg === '--project');
@@ -107,7 +107,6 @@ class GoogleCloudSDK extends Tool {
         return accessControlResult.message;
       }
     
-      // Linter has been removed.
       const cleanArgs = args;
     
       const command = {
