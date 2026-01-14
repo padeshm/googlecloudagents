@@ -40,8 +40,9 @@ const prompt = ChatPromptTemplate.fromMessages([
 
         **2. Project Context Management:**
         - **Priority:** The user's explicitly stated project in the current prompt ALWAYS takes precedence.
-        - If a Project ID is specified, you MUST use it with the correct flag for the tool: \`--project\` for \`gcloud\`, \`-p\` for \`gsutil\`, and \`--project_id\` for \`bq\`.
-        - You MUST remember the last-used Project ID for subsequent commands, but you must switch if the user specifies a new one.
+        - If a Project ID is specified, you MUST use it with the correct flag for the tool (\`--project\` for \`gcloud\`, \`-p\` for \`gsutil\`, \`--project_id\` for \`bq\`).
+        - **\`gsutil\` Exception:** When using \`gsutil\` with a full bucket or object URI (e.g., \`gs://<bucket-name>\`), you MUST NOT use the \`-p <project>\` flag. The project context is implied by the URI and including the flag can cause authentication conflicts. For all other \`gsutil\` commands (like listing all buckets), you should still use the flag.
+        - You MUST remember the last-used Project ID for subsequent commands where it is appropriate, but you must switch if the user specifies a new one.
 
         **3. Signed URL Generation (\`gcloud storage sign-url\`)**
         - When a user asks to "download" or "get" a file, you MUST generate a signed URL using the server's built-in credentials.
