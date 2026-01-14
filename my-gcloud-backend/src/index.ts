@@ -44,8 +44,10 @@ const prompt = ChatPromptTemplate.fromMessages([
         - You MUST remember the last-used Project ID for subsequent commands, but you must switch if the user specifies a new one.
 
         **3. User-Centric Actions (Be Helpful, Not Literal):**
-        - When a user asks to "download" or "get" a file from a Cloud Storage bucket, they want to download it to their own computer. Do NOT use \`gsutil cp\` to download it to your local environment.
-        - You MUST instead generate a temporary, secure signed URL for the object using the \`gsutil signurl\` command. This provides a link the user can click to download the file directly.
+        - When a user asks to "download" or "get" a file from a Cloud Storage bucket, you MUST generate a temporary, secure signed URL.
+        - To do this, you MUST use the \`gsutil signurl\` command with the \`--use-service-account\` flag, which is required for impersonation.
+        - **Correct Example:** \`gsutil signurl --use-service-account -p <project_id> gs://<bucket>/<object>\`
+
 
         **4. Kubernetes (GKE) Workflow:**
         - **Credentials:** To interact with a GKE cluster, you MUST first run \`gcloud container clusters get-credentials <CLUSTER_NAME> --zone <ZONE>\` (or --region) to configure kubectl access. You MUST extract the cluster's ZONE or REGION from the initial \`list\` command.
@@ -60,10 +62,10 @@ const prompt = ChatPromptTemplate.fromMessages([
         - If a previous command for a service (e.g., BigQuery) worked, and a subsequent one fails, do NOT conclude the entire API is disabled. The error is likely with your specific command. Re-examine it for syntax errors, incorrect names, or permissions specific to that resource before answering.
 
         **6. BigQuery SQL Generation:**
-        - When a user asks a question that requires querying data *within* a table (e.g., "how many rows are in table 'foo'?", "what are the distinct country values in this table?"), you MUST use the \`bq query\` command.
-        - You are to construct a standard SQL query string to answer the user's question.
-        - **Example:** To count rows, generate: \`bq query --project_id <project> "SELECT COUNT(*) FROM \`<dataset>.<table_name>\`"\`.
-        - **Example:** To find distinct values, generate: \`bq query --project_id <project> "SELECT DISTINCT <column_name> FROM \`<dataset>.<table_name>\`"\`.
+        - When a user asks a question that requires querying data (e.g., "how many rows...", "what are the distinct values..."), you MUST use the \`bq query\` command.
+        - You are to construct a standard SQL query string. The final command MUST be a single, clean command string. Pay careful attention to quoting.
+        - **Correct Example:** \`bq query --project_id <project> "SELECT COUNT(*) FROM \`<my-dataset.my-table>\`"\`
+        - **Important:** Ensure the generated command does not have extra or nested quotes around the SQL statement. The tool executes the command in a shell, and incorrect quoting will fail.
         - If the query is too complex (e.g., involves JOINs or window functions), you should respond that you can only handle simple SQL queries.`,
   ],
   new MessagesPlaceholder({ variableName: 'chat_history', optional: true }),
