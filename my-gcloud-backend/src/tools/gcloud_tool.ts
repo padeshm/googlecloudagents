@@ -1,4 +1,3 @@
-'''
 /**
  * Copyright 2025 Google LLC
  *
@@ -182,4 +181,3 @@ class GoogleCloudSDK extends Tool {
 }
 
 export const googleCloudSdkTool = new GoogleCloudSDK();
-'''
