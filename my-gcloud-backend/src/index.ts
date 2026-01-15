@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { ChatVertexAI } from '@langchain/google-vertexai';
-import { AgentExecutor, createToolCallingAgent } from 'langchain/agents'; // CHANGED
+import { AgentExecutor, createToolCallingAgent } from 'langchain/agents';
 import {
   ChatPromptTemplate,
   MessagesPlaceholder,
@@ -17,7 +17,7 @@ interface HistoryMessage {
 
 // --- 1. Initialize Model and Tools ---
 const model = new ChatVertexAI({
-  model: 'gemini-2.5-pro', // CORRECT MODEL PRESERVED
+  model: 'gemini-2.5-pro',
   temperature: 0,
 });
 
@@ -49,8 +49,8 @@ const prompt = ChatPromptTemplate.fromMessages([
         - **Listing Files:** To list files in a bucket, the correct command is \`gcloud storage ls gs://<bucket_name>\`.
 
         **4. Signed URL Generation (\`gcloud storage sign-url\`)**
-        - **Output Parsing:** The \`gcloud storage sign-url\` command returns a YAML structure. You MUST parse this output and extract **only** the final URL from the \`signed_url\` field.
         - When a user asks to "download" or "get" a file, you MUST generate a signed URL using the server's built-in credentials.
+        - The tool will automatically handle the output and provide just the URL.
         - You MUST include the \`--project <project_id>\` flag in the command, using the project you know from context.
         - You MUST include the \`--region <bucket_location>\` flag, using the bucket location you extracted from the bucket list command.
         - You MUST NOT run \`gcloud auth list\` for this purpose.
@@ -79,7 +79,7 @@ const prompt = ChatPromptTemplate.fromMessages([
   ],
   new MessagesPlaceholder({ variableName: 'chat_history', optional: true }),
   ['human', '{input}'],
-  new MessagesPlaceholder('agent_scratchpad'), // agent_scratchpad is now a placeholder for the new agent
+  new MessagesPlaceholder('agent_scratchpad'),
 ]);
 
 // --- 4. Set up the Express Server ---
@@ -88,10 +88,10 @@ app.use(cors());
 app.use(express.json());
 
 async function startServer() {
-  // BUILD_MARKER: V15 - Definitive Fix for sign-url context
-  console.log("[INDEX_LOG] Starting server with index.ts (V15)");
-  // --- 3. Create the Agent and Executor (Updated to createToolCallingAgent) ---
-  const agent = await createToolCallingAgent({ // CHANGED
+  // BUILD_MARKER: V23 - Simplified Agent Brain
+  console.log("[INDEX_LOG] Starting server with index.ts (V23)");
+
+  const agent = await createToolCallingAgent({
     llm: model,
     tools,
     prompt,
@@ -100,10 +100,9 @@ async function startServer() {
   const agentExecutor = new AgentExecutor({
     agent,
     tools,
-    verbose: false, // This is the change you approved
+    verbose: false,
   });
 
-  // --- 5. Define the API Endpoint (Logic remains the same)---
   app.post('/api/gcloud', async (req: Request, res: Response) => {
     console.log(`--- NEW GCLOUD-BACKEND REQUEST ---`);
     console.log(`[REQUEST_BODY]: ${JSON.stringify(req.body)}`);
@@ -167,5 +166,4 @@ async function startServer() {
   });
 }
 
-// Start the server
 startServer();

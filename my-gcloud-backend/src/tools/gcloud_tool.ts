@@ -46,7 +46,7 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V21 - Preserve bq query logic, fix spaces
+      // BUILD_MARKER: V23 - The architecturally correct fix.
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       let tool: string;
@@ -65,10 +65,10 @@ class GoogleCloudSDK extends Tool {
           args = [...preQueryArgs.slice(1), sqlQuery];
         }
       } else {
-        console.log('[GCLOUD_TOOL] Using robust parser for shell-like arguments.');
-        // This regex splits by spaces, but treats anything inside quotes as a single token.
+        console.log('[GCLOUD_TOOL] Using robust, shell-disabled parser.');
         const argRegex = /(?:[^\s"\']+|\"[^\"]*\"|\'[^\']*\')+/g;
-        const newArgs = commandString.match(argRegex) || [];
+        let newArgs = commandString.match(argRegex) || [];
+        newArgs = newArgs.map(arg => arg.replace(/^['\"]|['\"]$/g, ''));
         [tool, ...args] = newArgs;
       }
 
@@ -89,9 +89,8 @@ class GoogleCloudSDK extends Tool {
         env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
       }
 
-      // --- Robust Project ID Parsing ---
       let projectId = '';
-      const projectArg = args.find(arg => arg.startsWith('--project') || arg.startsWith('-p'));
+      const projectArg = args.find(arg => arg.startsWith('--project'));
       const bqProjectArg = args.find(arg => arg.startsWith('--project_id'));
 
       if (projectArg) {
@@ -103,8 +102,6 @@ class GoogleCloudSDK extends Tool {
                   projectId = args[projectIndex + 1];
               }
           }
-          if(projectId) console.log(`[GCLOUD_TOOL] Found --project/-p flag. Using project: ${projectId}`);
-
       } else if (bqProjectArg) {
           if (bqProjectArg.includes('=')) {
               projectId = bqProjectArg.split('=')[1];
@@ -114,14 +111,12 @@ class GoogleCloudSDK extends Tool {
                   projectId = args[projectIndex + 1];
               }
           }
-          if(projectId) console.log(`[GCLOUD_TOOL] Found --project_id flag. Using project: ${projectId}`);
       }
 
-      // Stateful Project Context
       if (projectId) {
         console.log(`[GCLOUD_TOOL] Forcing CLOUDSDK_CORE_PROJECT to: ${projectId}`);
         env['CLOUDSDK_CORE_PROJECT'] = projectId;
-        lastKnownProjectId = projectId; // Remember the project for subsequent calls
+        lastKnownProjectId = projectId;
       } else if (lastKnownProjectId) {
         console.log(`[GCLOUD_TOOL] No project flag in command, using last known project: ${lastKnownProjectId}`);
         env['CLOUDSDK_CORE_PROJECT'] = lastKnownProjectId;
@@ -132,29 +127,19 @@ class GoogleCloudSDK extends Tool {
         return accessControlResult.message;
       }
     
-      const cleanArgs = args;
-    
       const command = {
         tool: tool,
-        args: cleanArgs,
+        args: args,
       };
     
       return new Promise((resolve) => {
         let stdout = '';
         let stderr = '';
 
-        const child = child_process.spawn(command.tool, command.args, {
-          env,
-          shell: true 
-        });
+        const child = child_process.spawn(command.tool, command.args, { env, shell: false });
     
-        child.stdout.on('data', (data) => {
-          stdout += data.toString();
-        });
-    
-        child.stderr.on('data', (data) => {
-          stderr += data.toString();
-        });
+        child.stdout.on('data', (data) => { stdout += data.toString(); });
+        child.stderr.on('data', (data) => { stderr += data.toString(); });
     
         child.on('close', (code) => {
           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Command: '${command.tool} ${command.args.join(' ')}'`);
@@ -163,7 +148,15 @@ class GoogleCloudSDK extends Tool {
           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDERR: ${stderr}`);
 
           if (code === 0) {
-            if (stdout.trim() === '') {
+            if (isSignUrlCommand) {
+                const urlMatch = stdout.match(/^signed_url:\s*(https:\/\/.*)/m);
+                if (urlMatch && urlMatch[1]) {
+                    console.log(`[GCLOUD_TOOL] Extracted signed URL. Returning only the URL.`);
+                    resolve(urlMatch[1].trim());
+                } else {
+                    resolve('Command executed successfully, but failed to extract the signed URL from the output.');
+                }
+            } else if (stdout.trim() === '') {
                 resolve("Command executed successfully and returned no output.");
             } else {
                 resolve(stdout);
