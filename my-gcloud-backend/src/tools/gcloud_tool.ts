@@ -65,7 +65,7 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V31 - Fix build failure by adding dependency and types
+      // BUILD_MARKER: V33 - The ABSOLUTE FINAL Build Fix
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       const argRegex = /(?:[^\s"\']+|\"[^\"]*\"|\'[^\']*\')+/g;
@@ -125,7 +125,7 @@ class GoogleCloudSDK extends Tool {
                 if (rows.length === 0) return "Query executed successfully and returned no rows.";
                 const headers = Object.keys(rows[0]);
                 const headerLine = headers.join('\t|\t');
-                const dataLines = rows.map((row: any) => headers.map(h => row[h]).join('\t|\t')).join('\n');
+                const dataLines = rows.map((row: any) => headers.map((h: string) => row[h]).join('\t|\t')).join('\n');
                 return `${headerLine}\n${dataLines}`;
             }
             
@@ -137,7 +137,7 @@ class GoogleCloudSDK extends Tool {
         }
       }
 
-      // --- EXISTING GCLOUD/GSUTIL/KUBECTL LOGIC (UNCHANGED) ---
+      // --- EXISTING GCLOUD/GSUTIL/KUBECTL LOGIC (WITH EXPLICIT TYPES) ---
       console.log(`[GCLOUD_TOOL] Using child_process for command: ${commandString}`);
       const env = { ...process.env };
       env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
@@ -154,8 +154,8 @@ class GoogleCloudSDK extends Tool {
 
         const child = child_process.spawn(tool, args, { env, shell: false });
     
-        child.stdout.on('data', (data) => { stdout += data.toString(); });
-        child.stderr.on('data', (data) => { stderr += data.toString(); });
+        child.stdout.on('data', (data: any) => { stdout += data.toString(); });
+        child.stderr.on('data', (data: any) => { stderr += data.toString(); });
     
         child.on('close', (code) => {
           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Command: '${tool} ${args.join(' ')}'`);
@@ -182,7 +182,7 @@ class GoogleCloudSDK extends Tool {
           }
         });
     
-        child.on('error', (err) => {
+        child.on('error', (err: any) => {
           resolve(`Failed to start the ${tool} process: ${err.message}`);
         });
       });
