@@ -46,7 +46,7 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V23 - The architecturally correct fix.
+      // BUILD_MARKER: V24 - TypeScript build fix
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       let tool: string;
@@ -67,9 +67,12 @@ class GoogleCloudSDK extends Tool {
       } else {
         console.log('[GCLOUD_TOOL] Using robust, shell-disabled parser.');
         const argRegex = /(?:[^\s"\']+|\"[^\"]*\"|\'[^\']*\')+/g;
-        let newArgs = commandString.match(argRegex) || [];
-        newArgs = newArgs.map(arg => arg.replace(/^['\"]|['\"]$/g, ''));
-        [tool, ...args] = newArgs;
+        const matchedArgs = commandString.match(argRegex) || [];
+        if (matchedArgs.length === 0) {
+            return "Error: Invalid command. The command string cannot be empty.";
+        }
+        const processedArgs = matchedArgs.map(arg => arg.replace(/^['\"]|['\"]$/g, ''));
+        [tool, ...args] = processedArgs;
       }
 
       if (!["gcloud", "gsutil", "kubectl", "bq"].includes(tool)) {
