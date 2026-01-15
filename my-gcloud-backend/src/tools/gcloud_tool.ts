@@ -46,14 +46,14 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V19 - Robust Project ID Parser
+      // BUILD_MARKER: V21 - Preserve bq query logic, fix spaces
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       let tool: string;
       let args: string[];
 
       if (commandString.startsWith('bq query')) {
-        console.log('[GCLOUD_TOOL] bq query detected. Using smart parser.');
+        console.log('[GCLOUD_TOOL] bq query detected. Using smart parser for SQL.');
         const sqlQueryIndex = commandString.indexOf("'");
         if (sqlQueryIndex === -1) {
           [tool, ...args] = commandString.trim().split(' ');
@@ -65,7 +65,11 @@ class GoogleCloudSDK extends Tool {
           args = [...preQueryArgs.slice(1), sqlQuery];
         }
       } else {
-        [tool, ...args] = commandString.trim().split(' ');
+        console.log('[GCLOUD_TOOL] Using robust parser for shell-like arguments.');
+        // This regex splits by spaces, but treats anything inside quotes as a single token.
+        const argRegex = /(?:[^\s"\']+|\"[^\"]*\"|\'[^\']*\')+/g;
+        const newArgs = commandString.match(argRegex) || [];
+        [tool, ...args] = newArgs;
       }
 
       if (!["gcloud", "gsutil", "kubectl", "bq"].includes(tool)) {

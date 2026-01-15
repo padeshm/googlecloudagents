@@ -49,6 +49,7 @@ const prompt = ChatPromptTemplate.fromMessages([
         - **Listing Files:** To list files in a bucket, the correct command is \`gcloud storage ls gs://<bucket_name>\`.
 
         **4. Signed URL Generation (\`gcloud storage sign-url\`)**
+        - **Output Parsing:** The \`gcloud storage sign-url\` command returns a YAML structure. You MUST parse this output and extract **only** the final URL from the \`signed_url\` field.
         - When a user asks to "download" or "get" a file, you MUST generate a signed URL using the server's built-in credentials.
         - You MUST include the \`--project <project_id>\` flag in the command, using the project you know from context.
         - You MUST include the \`--region <bucket_location>\` flag, using the bucket location you extracted from the bucket list command.
