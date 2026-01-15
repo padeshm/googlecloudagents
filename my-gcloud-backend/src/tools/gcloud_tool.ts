@@ -31,7 +31,7 @@ let lastKnownProjectId = ''; // Add stateful variable for project ID
 const defaultDeny = [
   'sftp',
   'ssh',
-  'docker', // Requires configuring docker-credential-gcr.
+  'docker',
   'gen-repo-info-file',
 ];
 
@@ -46,7 +46,7 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V24 - TypeScript build fix
+      // BUILD_MARKER: V26 - The surgical bq query fix
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       let tool: string;
@@ -59,7 +59,8 @@ class GoogleCloudSDK extends Tool {
           [tool, ...args] = commandString.trim().split(' ');
         } else {
           const preQueryString = commandString.substring(0, sqlQueryIndex).trim();
-          const sqlQuery = commandString.substring(sqlQueryIndex);
+          // **THE FIX**: Remove the surrounding quotes from the SQL query string for shell: false
+          const sqlQuery = commandString.substring(sqlQueryIndex).replace(/^'|'$/g, '');
           const preQueryArgs = preQueryString.split(' ').filter(arg => arg.length > 0);
           tool = preQueryArgs[0];
           args = [...preQueryArgs.slice(1), sqlQuery];
