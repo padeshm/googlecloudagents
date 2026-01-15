@@ -46,32 +46,25 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V18 - Smart Parser for bq query
+      // BUILD_MARKER: V19 - Robust Project ID Parser
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       let tool: string;
       let args: string[];
 
-      // The simple .split(' ') is not robust enough for commands that contain
-      // quoted arguments with spaces, like `bq query 'SELECT ...'`.
-      // We need to special-case `bq query` to handle this.
       if (commandString.startsWith('bq query')) {
         console.log('[GCLOUD_TOOL] bq query detected. Using smart parser.');
         const sqlQueryIndex = commandString.indexOf("'");
         if (sqlQueryIndex === -1) {
-          // Fallback for malformed bq query command without single quotes
           [tool, ...args] = commandString.trim().split(' ');
         } else {
           const preQueryString = commandString.substring(0, sqlQueryIndex).trim();
-          // The SQL query is the rest of the string, preserving quotes.
           const sqlQuery = commandString.substring(sqlQueryIndex);
-          
           const preQueryArgs = preQueryString.split(' ').filter(arg => arg.length > 0);
           tool = preQueryArgs[0];
           args = [...preQueryArgs.slice(1), sqlQuery];
         }
       } else {
-        // For all other commands, the simple split is sufficient.
         [tool, ...args] = commandString.trim().split(' ');
       }
 
@@ -84,7 +77,6 @@ class GoogleCloudSDK extends Tool {
       
       const isSignUrlCommand = commandString.includes('gcloud storage sign-url');
 
-      // Logic to handle impersonation context
       if (isSignUrlCommand) {
         console.log('[GCLOUD_TOOL] Impersonation bypassed for sign-url. Using application default credentials.');
       } 
@@ -93,28 +85,32 @@ class GoogleCloudSDK extends Tool {
         env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
       }
 
-      // Find the project ID from command flags.
+      // --- Robust Project ID Parsing ---
       let projectId = '';
-      const projectIndex = args.findIndex(arg => arg === '--project');
-      const pIndex = args.findIndex(arg => arg === '-p');
-      const bqIndex = args.findIndex(arg => arg.startsWith('--project_id'));
+      const projectArg = args.find(arg => arg.startsWith('--project') || arg.startsWith('-p'));
+      const bqProjectArg = args.find(arg => arg.startsWith('--project_id'));
 
-      if (projectIndex !== -1 && projectIndex + 1 < args.length) {
-          projectId = args[projectIndex + 1];
-          console.log(`[GCLOUD_TOOL] Found --project flag. Using project: ${projectId}`);
-      } else if (pIndex !== -1 && pIndex + 1 < args.length) {
-          projectId = args[pIndex + 1];
-          console.log(`[GCLOUD_TOOL] Found -p flag. Using project: ${projectId}`);
-      } else if (bqIndex !== -1) {
-          const bqArg = args[bqIndex];
-          if (bqArg.includes('=')) {
-              projectId = bqArg.split('=')[1];
-          } else if (bqIndex + 1 < args.length) {
-              projectId = args[bqIndex + 1];
+      if (projectArg) {
+          if (projectArg.includes('=')) {
+              projectId = projectArg.split('=')[1];
+          } else {
+              const projectIndex = args.indexOf(projectArg);
+              if (projectIndex !== -1 && projectIndex + 1 < args.length) {
+                  projectId = args[projectIndex + 1];
+              }
           }
-          if(projectId) {
-              console.log(`[GCLOUD_TOOL] Found --project_id flag. Using project: ${projectId}`);
+          if(projectId) console.log(`[GCLOUD_TOOL] Found --project/-p flag. Using project: ${projectId}`);
+
+      } else if (bqProjectArg) {
+          if (bqProjectArg.includes('=')) {
+              projectId = bqProjectArg.split('=')[1];
+          } else {
+            const projectIndex = args.indexOf(bqProjectArg);
+              if (projectIndex !== -1 && projectIndex + 1 < args.length) {
+                  projectId = args[projectIndex + 1];
+              }
           }
+          if(projectId) console.log(`[GCLOUD_TOOL] Found --project_id flag. Using project: ${projectId}`);
       }
 
       // Stateful Project Context
@@ -145,7 +141,7 @@ class GoogleCloudSDK extends Tool {
 
         const child = child_process.spawn(command.tool, command.args, {
           env,
-          shell: true // Using shell to correctly handle quoted arguments
+          shell: true 
         });
     
         child.stdout.on('data', (data) => {

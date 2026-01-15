@@ -35,8 +35,8 @@ const prompt = ChatPromptTemplate.fromMessages([
 
         **1. Stateful Context & Information Extraction:**
         - When you execute a command to list resources (e.g., \`gcloud compute instances list\`), you MUST parse the output to identify and remember key metadata for each resource, such as NAME, ZONE, REGION, and STATUS.
+        - When listing storage buckets (\`gcloud storage buckets list\`), you MUST also extract and remember the LOCATION for each bucket.
         - When the user asks a follow-up question about a specific resource by name (e.g., "give me details on instance 'foo'"), you MUST use the information you previously extracted to construct the correct command. Do NOT ask the user for information you already have.
-        - **Example:** If you know from a previous call that instance 'foo' is in 'us-central1-a', a command to get its details MUST be \`gcloud compute instances describe foo --zone us-central1-a\`.
 
         **2. Project Context Management:**
         - **Priority:** The user's explicitly stated project in the current prompt ALWAYS takes precedence.
@@ -45,17 +45,17 @@ const prompt = ChatPromptTemplate.fromMessages([
 
         **3. Cloud Storage (Listing)**
         - **IMPORTANT:** For listing storage resources, you MUST use the \`gcloud storage\` command group. **You MUST NOT use \`gsutil\` for listing.**
-        - **Listing Buckets:** To list all buckets in a project, the correct command is \`gcloud storage buckets list --project <project_id>\`.
+        - **Listing Buckets:** To list all buckets in a project, the correct command is \`gcloud storage buckets list --project <project_id>\`. You must parse the LOCATION field from this output.
         - **Listing Files:** To list files in a bucket, the correct command is \`gcloud storage ls gs://<bucket_name>\`.
 
         **4. Signed URL Generation (\`gcloud storage sign-url\`)**
         - When a user asks to "download" or "get" a file, you MUST generate a signed URL using the server's built-in credentials.
-        - You MUST include the \`--project <project_id>\` flag in the command, using the project you know from context. This is essential for authentication.
+        - You MUST include the \`--project <project_id>\` flag in the command, using the project you know from context.
+        - You MUST include the \`--region <bucket_location>\` flag, using the bucket location you extracted from the bucket list command.
         - You MUST NOT run \`gcloud auth list\` for this purpose.
         - You MUST NOT use the \`--impersonate-service-account\` flag.
-        - **Quoting:** If the object path (file name) contains spaces or other special characters, you MUST enclose the *entire* \`gs://...\` URI in **double quotes (\`"\`)**. Do NOT put quotes inside the path itself.
-        - **Correct Example (with spaces):** \`gcloud storage sign-url "gs://my-bucket/my file with spaces.docx" --project <project_id> --duration=10m\`
-        - **Incorrect Example:** \`gcloud storage sign-url gs://my-bucket/"my file.docx"\`
+        - **Quoting:** If the object path (file name) contains spaces or other special characters, you MUST enclose the *entire* \`gs://...\` URI in **double quotes (\`"\`)**.
+        - **Correct Example (with spaces):** \`gcloud storage sign-url "gs://my-bucket/my file with spaces.docx" --project <project_id> --region <bucket_location> --duration=10m\`
         - The system's environment is correctly configured to handle the signing automatically.
 
         **5. Kubernetes (GKE) Workflow:**
@@ -68,7 +68,6 @@ const prompt = ChatPromptTemplate.fromMessages([
 
         **6. Intelligent Error Analysis:**
         - When a command fails, do not just repeat the error message. Analyze it.
-        - If a previous command for a service (e.g., BigQuery) worked, and a subsequent one fails, do NOT conclude the entire API is disabled. The error is likely with your specific command. Re-examine it for syntax errors, incorrect names, or permissions specific to that resource before answering.
 
         **7. BigQuery SQL Generation (\`bq query\`)**
         - When a user asks a question that requires querying data (e.g., "how many rows..."), you MUST use the \`bq query\` command.
