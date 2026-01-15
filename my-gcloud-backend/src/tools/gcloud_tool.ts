@@ -46,7 +46,7 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V27 - The bq authentication fix
+      // BUILD_MARKER: V28 - The *Definitive* bq authentication fix
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       let tool: string;
@@ -88,12 +88,10 @@ class GoogleCloudSDK extends Tool {
         console.log('[GCLOUD_TOOL] Impersonation bypassed for sign-url. Using application default credentials.');
       } 
       else if (userAccessToken) {
-        console.log('[GCLOUD_TOOL] User access token found.');
-        // This env var works for `gcloud` but NOT for `bq` or `gsutil`
+        console.log('[GCLOUD_TOOL] User access token found. Setting auth for command.');
         env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
         
-        // **THE FIX**: For `bq`, we must also pass the token directly as a flag.
-        if (tool === 'bq' && userAccessToken) {
+        if (tool === 'bq') {
             console.log('[GCLOUD_TOOL] Command is for bq, adding --access_token flag.');
             args.push('--access_token', userAccessToken);
         }
