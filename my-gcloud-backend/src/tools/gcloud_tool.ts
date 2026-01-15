@@ -65,7 +65,7 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V30 - The Definitive BQ SDK FIX
+      // BUILD_MARKER: V31 - Fix build failure by adding dependency and types
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       const argRegex = /(?:[^\s"\']+|\"[^\"]*\"|\'[^\']*\')+/g;
@@ -105,15 +105,15 @@ class GoogleCloudSDK extends Tool {
             if (subcommand === 'ls') {
                 if (bqArgs.includes('--datasets')) {
                     const [datasets] = await bqClient.getDatasets();
-                    return datasets.map(d => d.id).join('\n');
+                    return datasets.map((d: any) => d.id).join('\n');
                 }
                 const datasetId = bqArgs.find(arg => !arg.startsWith('--'));
                 if (datasetId) {
                     const [tables] = await bqClient.dataset(datasetId).getTables();
-                    return tables.map(t => t.id).join('\n');
+                    return tables.map((t: any) => t.id).join('\n');
                 } 
                 const [datasets] = await bqClient.getDatasets();
-                return datasets.map(d => d.id).join('\n');
+                return datasets.map((d: any) => d.id).join('\n');
             }
 
             if (subcommand === 'query') {
@@ -125,7 +125,7 @@ class GoogleCloudSDK extends Tool {
                 if (rows.length === 0) return "Query executed successfully and returned no rows.";
                 const headers = Object.keys(rows[0]);
                 const headerLine = headers.join('\t|\t');
-                const dataLines = rows.map(row => headers.map(h => row[h]).join('\t|\t')).join('\n');
+                const dataLines = rows.map((row: any) => headers.map(h => row[h]).join('\t|\t')).join('\n');
                 return `${headerLine}\n${dataLines}`;
             }
             
