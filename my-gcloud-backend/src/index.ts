@@ -19,6 +19,7 @@ interface HistoryMessage {
 const model = new ChatVertexAI({
   model: 'gemini-2.5-pro',
   temperature: 0,
+  maxOutputTokens: 8192,
 });
 
 const tools = [googleCloudSdkTool];

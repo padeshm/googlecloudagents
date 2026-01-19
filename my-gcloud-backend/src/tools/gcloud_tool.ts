@@ -16,7 +16,6 @@
 
 import { Tool } from "@langchain/core/tools";
 import * as child_process from 'child_process';
-import { BigQuery } from '@google-cloud/bigquery';
 import {
   AccessControlList,
   createAccessControlList,
@@ -36,26 +35,6 @@ const defaultDeny = [
 
 const accessControl = createAccessControlList([], defaultDeny);
 
-function getProjectIdFromArgs(args: string[]): string | undefined {
-    const projectArg = args.find(arg => arg.startsWith('--project='));
-    if (projectArg) return projectArg.split('=')[1];
-
-    const projectIdArg = args.find(arg => arg.startsWith('--project_id='));
-    if (projectIdArg) return projectIdArg.split('=')[1];
-
-    let projectIndex = args.indexOf('--project');
-    if (projectIndex !== -1 && projectIndex + 1 < args.length) {
-        return args[projectIndex + 1];
-    }
-
-    projectIndex = args.indexOf('--project_id');
-    if (projectIndex !== -1 && projectIndex + 1 < args.length) {
-        return args[projectIndex + 1];
-    }
-
-    return undefined;
-}
-
 class GoogleCloudSDK extends Tool {
     name = 'google-cloud-sdk';
     description = `Executes a command for a Google Cloud command-line interface: gcloud, gsutil, kubectl, or bq. Input should be the full command string.`;
@@ -65,7 +44,6 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
-      // BUILD_MARKER: V33 - The ABSOLUTE FINAL Build Fix
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       const argRegex = /(?:[^\s"\']+|\"[^\"]*\"|\'[^\']*\')+/g;
@@ -84,65 +62,39 @@ class GoogleCloudSDK extends Tool {
         return "Error: User access token is missing. Cannot authenticate.";
       }
 
-      const projectId = getProjectIdFromArgs(args) || lastKnownProjectId;
+      // Simple project ID parsing
+      const projectFlag = args.find(arg => arg.startsWith('--project') || arg.startsWith('--project_id'));
+      let projectId = projectFlag ? projectFlag.split('=')[1] : undefined;
+      if (!projectId) {
+          const projectIndex = args.indexOf('--project') + 1;
+          if (projectIndex > 0 && projectIndex < args.length) {
+              projectId = args[projectIndex];
+          }
+          const projectIdIndex = args.indexOf('--project_id') + 1;
+          if (projectIdIndex > 0 && projectIdIndex < args.length) {
+              projectId = args[projectIdIndex];
+          }
+      }
+
       if (projectId) {
         lastKnownProjectId = projectId;
         console.log(`[GCLOUD_TOOL] Project ID for this operation: ${projectId}`);
-      } else if (tool === 'bq') {
-        return "Error: BigQuery commands require a project ID. Please specify one with --project_id.";
+      } else if(lastKnownProjectId) {
+        console.log(`[GCLOUD_TOOL] Using last known Project ID: ${lastKnownProjectId}`);
+        projectId = lastKnownProjectId;
       }
 
-      // --- BQ SDK LOGIC ---
-      if (tool === 'bq') {
-        console.log(`[GCLOUD_TOOL] Using BigQuery SDK for command: bq ${args.join(' ')}`);
-        const bqClient = new BigQuery({
-            credentials: { access_token: userAccessToken },
-            projectId: projectId,
-        });
-
-        try {
-            const [subcommand, ...bqArgs] = args;
-            if (subcommand === 'ls') {
-                if (bqArgs.includes('--datasets')) {
-                    const [datasets] = await bqClient.getDatasets();
-                    return datasets.map((d: any) => d.id).join('\n');
-                }
-                const datasetId = bqArgs.find(arg => !arg.startsWith('--'));
-                if (datasetId) {
-                    const [tables] = await bqClient.dataset(datasetId).getTables();
-                    return tables.map((t: any) => t.id).join('\n');
-                } 
-                const [datasets] = await bqClient.getDatasets();
-                return datasets.map((d: any) => d.id).join('\n');
-            }
-
-            if (subcommand === 'query') {
-                const query = bqArgs.find(arg => !arg.startsWith('--'));
-                if (!query) return "Error: No SQL query found for 'bq query'.";
-                const [job] = await bqClient.createQueryJob({ query });
-                const [rows] = await job.getQueryResults();
-                // Format rows as a simple string table for the agent
-                if (rows.length === 0) return "Query executed successfully and returned no rows.";
-                const headers = Object.keys(rows[0]);
-                const headerLine = headers.join('\t|\t');
-                const dataLines = rows.map((row: any) => headers.map((h: string) => row[h]).join('\t|\t')).join('\n');
-                return `${headerLine}\n${dataLines}`;
-            }
-            
-            return `Error: The 'bq ${subcommand}' command is not yet supported by the SDK implementation.`;
-
-        } catch (e: any) {
-            console.error(`[GCLOUD_TOOL] BQ SDK Error: ${e.message}`);
-            return `Error executing BigQuery command: ${e.message}`;
-        }
-      }
-
-      // --- EXISTING GCLOUD/GSUTIL/KUBECTL LOGIC (WITH EXPLICIT TYPES) ---
-      console.log(`[GCLOUD_TOOL] Using child_process for command: ${commandString}`);
       const env = { ...process.env };
-      env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
+      
       if(projectId) env['CLOUDSDK_CORE_PROJECT'] = projectId;
 
+      // The bq tool does not reliably use the CLOUDSDK_AUTH_ACCESS_TOKEN env var.
+      // Instead, we must pass the token as a flag directly to the command.
+      if (tool === 'bq') {
+        args.unshift('--access_token', userAccessToken);
+      } else {
+        env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
+      }
       const accessControlResult = accessControl.check(args.join(' '));
       if (accessControlResult.permitted === false) {
         return accessControlResult.message;
@@ -154,8 +106,8 @@ class GoogleCloudSDK extends Tool {
 
         const child = child_process.spawn(tool, args, { env, shell: false });
     
-        child.stdout.on('data', (data: any) => { stdout += data.toString(); });
-        child.stderr.on('data', (data: any) => { stderr += data.toString(); });
+        child.stdout.on('data', (data) => { stdout += data.toString(); });
+        child.stderr.on('data', (data) => { stderr += data.toString(); });
     
         child.on('close', (code) => {
           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Command: '${tool} ${args.join(' ')}'`);
@@ -182,7 +134,7 @@ class GoogleCloudSDK extends Tool {
           }
         });
     
-        child.on('error', (err: any) => {
+        child.on('error', (err) => {
           resolve(`Failed to start the ${tool} process: ${err.message}`);
         });
       });
