@@ -44,6 +44,7 @@ class GoogleCloudSDK extends Tool {
       runManager?: CallbackManagerForToolRun,
       config?: RunnableConfig
     ): Promise<string> {
+      // BUILD_MARKER: V29 - The REAL `bq` fix, derived from the user's -old file.
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
       const argRegex = /(?:[^\s\"\']+|\"[^\"]*\"|\'[^\']*\')+/g;
@@ -51,7 +52,7 @@ class GoogleCloudSDK extends Tool {
       if (rawArgs.length === 0) {
           return "Error: Invalid command. The command string cannot be empty.";
       }
-      let [tool, ...args] = rawArgs.map(arg => arg.replace(/^['\"]|['\"]$/g, ''));
+      const [tool, ...args] = rawArgs.map(arg => arg.replace(/^['\"]|['\"]$/g, ''));
 
       if (!["gcloud", "gsutil", "kubectl", "bq"].includes(tool)) {
         return `Error: Invalid tool '${tool}'. The first word of the command must be one of gcloud, gsutil, kubectl, or bq.`;
@@ -83,13 +84,7 @@ class GoogleCloudSDK extends Tool {
         console.log(`[GCLOUD_TOOL] Using last known Project ID: ${lastKnownProjectId}`);
         projectId = lastKnownProjectId;
       }
-
-      // The logic for bq commands must be handled by the gcloud wrapper to ensure proper authentication.
-      if (tool === 'bq') {
-        args.unshift('bq');
-        tool = 'gcloud';
-      }
-
+      
       const env = { ...process.env };
       env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
       if(projectId) env['CLOUDSDK_CORE_PROJECT'] = projectId;
@@ -103,7 +98,8 @@ class GoogleCloudSDK extends Tool {
         let stdout = '';
         let stderr = '';
 
-        const child = child_process.spawn(tool, args, { env, shell: false });
+        // Reverting to shell:true, which was the key difference in the working gcloud_tool_old.ts
+        const child = child_process.spawn(tool, args, { env, shell: true });
     
         child.stdout.on('data', (data) => { stdout += data.toString(); });
         child.stderr.on('data', (data) => { stderr += data.toString(); });
