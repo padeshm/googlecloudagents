@@ -89,7 +89,7 @@ class GoogleCloudSDK extends Tool {
       env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
       if(projectId) env['CLOUDSDK_CORE_PROJECT'] = projectId;
 
-      const accessControlResult = accessControl.check(args.join(' '));
+      const accessControlResult = accessControl.check(commandString);
       if (accessControlResult.permitted === false) {
         return accessControlResult.message;
       }
@@ -99,13 +99,13 @@ class GoogleCloudSDK extends Tool {
         let stderr = '';
 
         // Reverting to shell:true, which was the key difference in the working gcloud_tool_old.ts
-        const child = child_process.spawn(tool, args, { env, shell: true });
+        const child = child_process.spawn(commandString, { env, shell: true });
     
         child.stdout.on('data', (data) => { stdout += data.toString(); });
         child.stderr.on('data', (data) => { stderr += data.toString(); });
     
         child.on('close', (code) => {
-          console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Command: '${tool} ${args.join(' ')}'`);
+          console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Command: '${commandString}'`);
           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Exit Code: ${code}`);
           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDOUT: ${stdout}`);
           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDERR: ${stderr}`);
@@ -130,7 +130,7 @@ class GoogleCloudSDK extends Tool {
         });
     
         child.on('error', (err) => {
-          resolve(`Failed to start the ${tool} process: ${err.message}`);
+          resolve(`Failed to start the process: ${err.message}`);
         });
       });
     }
