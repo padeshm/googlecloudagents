@@ -66,6 +66,10 @@ class GoogleCloudSDK extends Tool {
       // Simple project ID parsing
       const projectFlag = args.find(arg => arg.startsWith('--project') || arg.startsWith('--project_id'));
       let projectId = projectFlag ? projectFlag.split('=')[1] : undefined;
+      if (projectId) {
+        // Clean up quotes from the parsed project ID
+        projectId = projectId.replace(/^["|']|["|']$/g, "");
+      }
       if (!projectId) {
           const projectIndex = args.indexOf('--project') + 1;
           if (projectIndex > 0 && projectIndex < args.length) {
@@ -86,7 +90,15 @@ class GoogleCloudSDK extends Tool {
       }
       
       const env = { ...process.env };
-      env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
+      
+      const isSignUrlCommand = commandString.includes('gcloud storage sign-url');
+      if (isSignUrlCommand) {
+        console.log('[GCLOUD_TOOL] Impersonation bypassed for sign-url. Using application default credentials.');
+      } else {
+        console.log('[GCLOUD_TOOL] Impersonation active: Setting CLOUDSDK_AUTH_ACCESS_TOKEN in environment.');
+        env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
+      }
+
       if(projectId) env['CLOUDSDK_CORE_PROJECT'] = projectId;
 
       const accessControlResult = accessControl.check(commandString);
@@ -111,8 +123,8 @@ class GoogleCloudSDK extends Tool {
           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDERR: ${stderr}`);
 
           if (code === 0) {
-            const isSignUrl = tool === 'gcloud' && args.includes('storage') && args.includes('sign-url');
-            if (isSignUrl) {
+            
+            if (isSignUrlCommand) {
                 const urlMatch = stdout.match(/^signed_url:\s*(https:\/\/.*)/m);
                 if (urlMatch && urlMatch[1]) {
                     resolve(urlMatch[1].trim());
