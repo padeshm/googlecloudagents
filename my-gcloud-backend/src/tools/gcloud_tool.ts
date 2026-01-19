@@ -46,12 +46,12 @@ class GoogleCloudSDK extends Tool {
     ): Promise<string> {
       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
 
-      const argRegex = /(?:[^\s"\']+|\"[^\"]*\"|\'[^\']*\')+/g;
+      const argRegex = /(?:[^\s\"\']+|\"[^\"]*\"|\'[^\']*\')+/g;
       const rawArgs = commandString.match(argRegex) || [];
       if (rawArgs.length === 0) {
           return "Error: Invalid command. The command string cannot be empty.";
       }
-      const [tool, ...args] = rawArgs.map(arg => arg.replace(/^['\"]|['\"]$/g, ''));
+      let [tool, ...args] = rawArgs.map(arg => arg.replace(/^['\"]|['\"]$/g, ''));
 
       if (!["gcloud", "gsutil", "kubectl", "bq"].includes(tool)) {
         return `Error: Invalid tool '${tool}'. The first word of the command must be one of gcloud, gsutil, kubectl, or bq.`;
@@ -84,17 +84,16 @@ class GoogleCloudSDK extends Tool {
         projectId = lastKnownProjectId;
       }
 
+      // The logic for bq commands must be handled by the gcloud wrapper to ensure proper authentication.
+      if (tool === 'bq') {
+        args.unshift('bq');
+        tool = 'gcloud';
+      }
+
       const env = { ...process.env };
-      
+      env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
       if(projectId) env['CLOUDSDK_CORE_PROJECT'] = projectId;
 
-      // The bq tool does not reliably use the CLOUDSDK_AUTH_ACCESS_TOKEN env var.
-      // Instead, we must pass the token as a flag directly to the command.
-      if (tool === 'bq') {
-        args.unshift('--access_token', userAccessToken);
-      } else {
-        env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
-      }
       const accessControlResult = accessControl.check(args.join(' '));
       if (accessControlResult.permitted === false) {
         return accessControlResult.message;
