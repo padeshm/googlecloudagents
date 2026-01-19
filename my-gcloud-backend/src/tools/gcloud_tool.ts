@@ -126,8 +126,37 @@ class GoogleCloudSDK extends Tool {
             
             if (isSignUrlCommand) {
                 const urlMatch = stdout.match(/^signed_url:\s*(https:\/\/.*)/m);
+                // This "if" block only runs if the above line successfully found a URL.
                 if (urlMatch && urlMatch[1]) {
-                    resolve(urlMatch[1].trim());
+                    
+                    // 1. Store the clean URL
+                    // Takes the raw URL found by urlMatch and stores it in a clean variable named `url`.
+                    const url = urlMatch[1].trim();
+
+                    // 2. Find the full file path from the original command
+                    // Looks through the command's arguments to find the one starting with `gs://`.
+                    const gsPath = args.find(arg => arg.startsWith('gs://'));
+                    
+                    // 3. Set a default filename
+                    // A safety measure in case the real filename can't be found.
+                    let filename = 'file'; 
+                    
+                    // 4. Extract the filename from the path
+                    if (gsPath) {
+                        // a. Splits the path by the `/` character.
+                        const parts = gsPath.split('/');
+                        // b. Takes the very last item from that array, which is the filename.
+                        const lastPart = parts[parts.length - 1];
+                        // c. Assigns this filename to our `filename` variable, if it's not empty.
+                        if (lastPart) { 
+                            filename = lastPart;
+                        }
+                    }
+
+                    // 5. Create and return the final Markdown link
+                    // Constructs a Markdown string like "[Download your-file.docx](https://...)"
+                    // and sends it back to the AI agent as the result.
+                    resolve(`[Download ${filename}](${url})`);
                 } else {
                     resolve('Command executed successfully, but failed to extract the signed URL from the output.');
                 }
