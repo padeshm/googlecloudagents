@@ -109,9 +109,33 @@ class GoogleCloudSDK extends Tool {
       return new Promise((resolve) => {
         let stdout = '';
         let stderr = '';
+        let child;
 
-        // Reverting to shell:true, which was the key difference in the working gcloud_tool_old.ts
-        const child = child_process.spawn(commandString, { env, shell: true });
+        // This is the surgical fix that implements your request.
+        // It detects the single failing pattern and handles it differently,
+        // leaving all other working commands completely unchanged.
+
+        // 1. Define a flag to identify ONLY the failing case: a sign-url command
+        //    that contains a quoted gs:// path (which implies spaces).
+        const isSignUrlWithSpaces = 
+            commandString.includes('gcloud storage sign-url') && 
+            commandString.includes('"gs://');
+
+        // 2. Check the flag.
+        if (isSignUrlWithSpaces) {
+            // 3. IF it's the failing case, run the command without a shell.
+            //    This is the standard, safe method that correctly handles arguments
+            //    with spaces (like the quoted gs:// path) because it passes them
+            //    as a clean list, avoiding any shell confusion.
+            console.log('[GCLOUD_TOOL] Detected sign-url with spaces. Using direct execution (no shell).');
+            child = child_process.spawn(tool, args, { env, shell: false });
+        } else {
+            // 4. FOR EVERYTHING ELSE (bq query, normal gcloud, sign-url without spaces),
+            //    use the existing method that you've confirmed is working.
+            //    This ensures those commands are not affected.
+            console.log('[GCLOUD_TOOL] Using shell execution.');
+            child = child_process.spawn(commandString, { env, shell: true });
+        }
     
         child.stdout.on('data', (data) => { stdout += data.toString(); });
         child.stderr.on('data', (data) => { stderr += data.toString(); });
@@ -125,37 +149,21 @@ class GoogleCloudSDK extends Tool {
           if (code === 0) {
             
             if (isSignUrlCommand) {
+                // This logic is from your approved version to format the URL.
                 const urlMatch = stdout.match(/^signed_url:\s*(https:\/\/.*)/m);
-                // This "if" block only runs if the above line successfully found a URL.
                 if (urlMatch && urlMatch[1]) {
-                    
-                    // 1. Store the clean URL
-                    // Takes the raw URL found by urlMatch and stores it in a clean variable named `url`.
                     const url = urlMatch[1].trim();
 
-                    // 2. Find the full file path from the original command
-                    // Looks through the command's arguments to find the one starting with `gs://`.
                     const gsPath = args.find(arg => arg.startsWith('gs://'));
-                    
-                    // 3. Set a default filename
-                    // A safety measure in case the real filename can't be found.
                     let filename = 'file'; 
-                    
-                    // 4. Extract the filename from the path
                     if (gsPath) {
-                        // a. Splits the path by the `/` character.
                         const parts = gsPath.split('/');
-                        // b. Takes the very last item from that array, which is the filename.
                         const lastPart = parts[parts.length - 1];
-                        // c. Assigns this filename to our `filename` variable, if it's not empty.
                         if (lastPart) { 
                             filename = lastPart;
                         }
                     }
 
-                    // 5. Create and return the final Markdown link
-                    // Constructs a Markdown string like "[Download your-file.docx](https://...)"
-                    // and sends it back to the AI agent as the result.
                     resolve(`[Download ${filename}](${url})`);
                 } else {
                     resolve('Command executed successfully, but failed to extract the signed URL from the output.');
