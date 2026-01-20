@@ -14,175 +14,192 @@
  * limitations under the License.
  */
 
-import { Tool } from "@langchain/core/tools";
-import * as child_process from 'child_process';
-import {
-  AccessControlList,
-  createAccessControlList,
-} from '../denylist';
-import * as gcloud from '../gcloud';
-import type { RunnableConfig } from "@langchain/core/runnables";
-import type { CallbackManagerForToolRun } from "@langchain/core/callbacks/manager";
+ import { Tool } from "@langchain/core/tools";
+ import * as child_process from 'child_process';
+ import {
+   AccessControlList,
+   createAccessControlList,
+ } from '../denylist';
+ import * as gcloud from '../gcloud';
+ import type { RunnableConfig } from "@langchain/core/runnables";
+ import type { CallbackManagerForToolRun } from "@langchain/core/callbacks/manager";
+ 
+ let lastKnownProjectId = '';
+ 
+ const defaultDeny = [
+   'sftp',
+   'ssh',
+   'docker',
+   'gen-repo-info-file',
+ ];
+ 
+ const accessControl = createAccessControlList([], defaultDeny);
+ 
+ class GoogleCloudSDK extends Tool {
+     name = 'google-cloud-sdk';
+     description = `Executes a command for a Google Cloud command-line interface: gcloud, gsutil, kubectl, or bq. Input should be the full command string.`;
+ 
+     async _call(
+       commandString: string,
+       runManager?: CallbackManagerForToolRun,
+       config?: RunnableConfig
+     ): Promise<string> {
+       // BUILD_MARKER: V29 - The REAL `bq` fix, derived from the user's -old file.
+       console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
+ 
+       const argRegex = /(?:[^\s\"\']+|\"[^\"]*\"|\'[^\']*\')+/g;
+       const rawArgs = commandString.match(argRegex) || [];
+       if (rawArgs.length === 0) {
+           return "Error: Invalid command. The command string cannot be empty.";
+       }
+       const [tool, ...args] = rawArgs.map(arg => arg.replace(/^['\"]|['\"]$/g, ''));
+ 
+       if (!["gcloud", "gsutil", "kubectl", "bq"].includes(tool)) {
+         return `Error: Invalid tool '${tool}'. The first word of the command must be one of gcloud, gsutil, kubectl, or bq.`;
+       }
+ 
+       const userAccessToken = config?.configurable?.userAccessToken;
+       if (!userAccessToken) {
+         return "Error: User access token is missing. Cannot authenticate.";
+       }
+ 
+       // Simple project ID parsing
+       const projectFlag = args.find(arg => arg.startsWith('--project') || arg.startsWith('--project_id'));
+       let projectId = projectFlag ? projectFlag.split('=')[1] : undefined;
+       if (projectId) {
+         // Clean up quotes from the parsed project ID
+         projectId = projectId.replace(/^["|']|["|']$/g, "");
+       }
+       if (!projectId) {
+           const projectIndex = args.indexOf('--project') + 1;
+           if (projectIndex > 0 && projectIndex < args.length) {
+               projectId = args[projectIndex];
+           }
+           const projectIdIndex = args.indexOf('--project_id') + 1;
+           if (projectIdIndex > 0 && projectIdIndex < args.length) {
+               projectId = args[projectIdIndex];
+           }
+       }
+ 
+       if (projectId) {
+         lastKnownProjectId = projectId;
+         console.log(`[GCLOUD_TOOL] Project ID for this operation: ${projectId}`);
+       } else if(lastKnownProjectId) {
+         console.log(`[GCLOUD_TOOL] Using last known Project ID: ${lastKnownProjectId}`);
+         projectId = lastKnownProjectId;
+       }
+       
+       const env = { ...process.env };
+       
+       const isSignUrlCommand = commandString.includes('gcloud storage sign-url');
+       if (isSignUrlCommand) {
+         console.log('[GCLOUD_TOOL] Impersonation bypassed for sign-url. Using application default credentials.');
+       } else {
+         console.log('[GCLOUD_TOOL] Impersonation active: Setting CLOUDSDK_AUTH_ACCESS_TOKEN in environment.');
+         env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
+       }
+ 
+       if(projectId) env['CLOUDSDK_CORE_PROJECT'] = projectId;
+ 
+       const accessControlResult = accessControl.check(commandString);
+       if (accessControlResult.permitted === false) {
+         return accessControlResult.message;
+       }
+     
+       return new Promise((resolve) => {
+         let stdout = '';
+         let stderr = '';
 
-let lastKnownProjectId = '';
+        // --- START: User-suggested URL-encoding fix ---
+        let finalCommandString = commandString;
+        // We only perform this transformation for the specific failing case.
+        if (commandString.includes('gcloud storage sign-url') && commandString.includes('"gs://')) {
+            console.log('[GCLOUD_TOOL] Detected sign-url with spaces. Applying URL-encoding fix.');
 
-const defaultDeny = [
-  'sftp',
-  'ssh',
-  'docker',
-  'gen-repo-info-file',
-];
+            // This regex finds the quoted "gs://..." path.
+            const gsPathRegex = /"gs:\/\/([^"]+)"/;
+            const match = commandString.match(gsPathRegex);
 
-const accessControl = createAccessControlList([], defaultDeny);
+            if (match && match[0] && match[1]) {
+                const fullQuotedPath = match[0]; // e.g., "gs://bucket/file with spaces.docx"
+                const innerPath = match[1];     // e.g., bucket/file with spaces.docx
 
-class GoogleCloudSDK extends Tool {
-    name = 'google-cloud-sdk';
-    description = `Executes a command for a Google Cloud command-line interface: gcloud, gsutil, kubectl, or bq. Input should be the full command string.`;
+                // Replace spaces with %20 ONLY within the path.
+                const encodedInnerPath = innerPath.replace(/ /g, '%20');
 
-    async _call(
-      commandString: string,
-      runManager?: CallbackManagerForToolRun,
-      config?: RunnableConfig
-    ): Promise<string> {
-      // BUILD_MARKER: V29 - The REAL `bq` fix, derived from the user's -old file.
-      console.log(`[GCLOUD_TOOL_LOG] Raw command string from agent: "${commandString}"`);
-
-      const argRegex = /(?:[^\s\"\']+|\"[^\"]*\"|\'[^\']*\')+/g;
-      const rawArgs = commandString.match(argRegex) || [];
-      if (rawArgs.length === 0) {
-          return "Error: Invalid command. The command string cannot be empty.";
-      }
-      const [tool, ...args] = rawArgs.map(arg => arg.replace(/^['\"]|['\"]$/g, ''));
-
-      if (!["gcloud", "gsutil", "kubectl", "bq"].includes(tool)) {
-        return `Error: Invalid tool '${tool}'. The first word of the command must be one of gcloud, gsutil, kubectl, or bq.`;
-      }
-
-      const userAccessToken = config?.configurable?.userAccessToken;
-      if (!userAccessToken) {
-        return "Error: User access token is missing. Cannot authenticate.";
-      }
-
-      // Simple project ID parsing
-      const projectFlag = args.find(arg => arg.startsWith('--project') || arg.startsWith('--project_id'));
-      let projectId = projectFlag ? projectFlag.split('=')[1] : undefined;
-      if (projectId) {
-        // Clean up quotes from the parsed project ID
-        projectId = projectId.replace(/^["|']|["|']$/g, "");
-      }
-      if (!projectId) {
-          const projectIndex = args.indexOf('--project') + 1;
-          if (projectIndex > 0 && projectIndex < args.length) {
-              projectId = args[projectIndex];
-          }
-          const projectIdIndex = args.indexOf('--project_id') + 1;
-          if (projectIdIndex > 0 && projectIdIndex < args.length) {
-              projectId = args[projectIdIndex];
-          }
-      }
-
-      if (projectId) {
-        lastKnownProjectId = projectId;
-        console.log(`[GCLOUD_TOOL] Project ID for this operation: ${projectId}`);
-      } else if(lastKnownProjectId) {
-        console.log(`[GCLOUD_TOOL] Using last known Project ID: ${lastKnownProjectId}`);
-        projectId = lastKnownProjectId;
-      }
-      
-      const env = { ...process.env };
-      
-      const isSignUrlCommand = commandString.includes('gcloud storage sign-url');
-      if (isSignUrlCommand) {
-        console.log('[GCLOUD_TOOL] Impersonation bypassed for sign-url. Using application default credentials.');
-      } else {
-        console.log('[GCLOUD_TOOL] Impersonation active: Setting CLOUDSDK_AUTH_ACCESS_TOKEN in environment.');
-        env['CLOUDSDK_AUTH_ACCESS_TOKEN'] = userAccessToken;
-      }
-
-      if(projectId) env['CLOUDSDK_CORE_PROJECT'] = projectId;
-
-      const accessControlResult = accessControl.check(commandString);
-      if (accessControlResult.permitted === false) {
-        return accessControlResult.message;
-      }
-    
-      return new Promise((resolve) => {
-        let stdout = '';
-        let stderr = '';
-        let child;
-
-        // This is the surgical fix that implements your request.
-        // It detects the single failing pattern and handles it differently,
-        // leaving all other working commands completely unchanged.
-
-        // 1. Define a flag to identify ONLY the failing case: a sign-url command
-        //    that contains a quoted gs:// path (which implies spaces).
-        const isSignUrlWithSpaces = 
-            commandString.includes('gcloud storage sign-url') && 
-            commandString.includes('"gs://');
-
-        // 2. Check the flag.
-        if (isSignUrlWithSpaces) {
-            // 3. IF it's the failing case, run the command without a shell.
-            //    This is the standard, safe method that correctly handles arguments
-            //    with spaces (like the quoted gs:// path) because it passes them
-            //    as a clean list, avoiding any shell confusion.
-            console.log('[GCLOUD_TOOL] Detected sign-url with spaces. Using direct execution (no shell).');
-            child = child_process.spawn(tool, args, { env, shell: false });
-        } else {
-            // 4. FOR EVERYTHING ELSE (bq query, normal gcloud, sign-url without spaces),
-            //    use the existing method that you've confirmed is working.
-            //    This ensures those commands are not affected.
-            console.log('[GCLOUD_TOOL] Using shell execution.');
-            child = child_process.spawn(commandString, { env, shell: true });
-        }
-    
-        child.stdout.on('data', (data) => { stdout += data.toString(); });
-        child.stderr.on('data', (data) => { stderr += data.toString(); });
-    
-        child.on('close', (code) => {
-          console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Command: '${commandString}'`);
-          console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Exit Code: ${code}`);
-          console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDOUT: ${stdout}`);
-          console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDERR: ${stderr}`);
-
-          if (code === 0) {
-            
-            if (isSignUrlCommand) {
-                // This logic is from your approved version to format the URL.
-                const urlMatch = stdout.match(/^signed_url:\s*(https:\/\/.*)/m);
-                if (urlMatch && urlMatch[1]) {
-                    const url = urlMatch[1].trim();
-
-                    const gsPath = args.find(arg => arg.startsWith('gs://'));
-                    let filename = 'file'; 
-                    if (gsPath) {
-                        const parts = gsPath.split('/');
-                        const lastPart = parts[parts.length - 1];
-                        if (lastPart) { 
-                            filename = lastPart;
-                        }
-                    }
-
-                    resolve(`[Download ${filename}](${url})`);
-                } else {
-                    resolve('Command executed successfully, but failed to extract the signed URL from the output.');
-                }
-            } else if (stdout.trim() === '') {
-                resolve("Command executed successfully and returned no output.");
-            } else {
-                resolve(stdout);
+                // Rebuild the final command, replacing the quoted path with an unquoted, encoded one.
+                finalCommandString = commandString.replace(fullQuotedPath, `gs://${encodedInnerPath}`);
+                console.log(`[GCLOUD_TOOL] Transformed command string: ${finalCommandString}`);
             }
-          } else {
-            resolve(`Error: Command failed with exit code ${code}. Stderr: ${stderr}`);
-          }
-        });
-    
-        child.on('error', (err) => {
-          resolve(`Failed to start the process: ${err.message}`);
-        });
-      });
-    }
-}
-
-export const googleCloudSdkTool = new GoogleCloudSDK();
+        }
+        // --- END: User-suggested URL-encoding fix ---
+ 
+ 
+         // Reverting to shell:true, which was the key difference in the working gcloud_tool_old.ts
+         const child = child_process.spawn(finalCommandString, { env, shell: true });
+     
+         child.stdout.on('data', (data) => { stdout += data.toString(); });
+         child.stderr.on('data', (data) => { stderr += data.toString(); });
+     
+         child.on('close', (code) => {
+           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Command: '${finalCommandString}'`);
+           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Exit Code: ${code}`);
+           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDOUT: ${stdout}`);
+           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDERR: ${stderr}`);
+ 
+           if (code === 0) {
+             
+             if (isSignUrlCommand) {
+                 const urlMatch = stdout.match(/^signed_url:\s*(https:\/\/.*)/m);
+                 // This "if" block only runs if the above line successfully found a URL.
+                 if (urlMatch && urlMatch[1]) {
+                     
+                     // 1. Store the clean URL
+                     // Takes the raw URL found by urlMatch and stores it in a clean variable named `url`.
+                     const url = urlMatch[1].trim();
+ 
+                     // 2. Find the full file path from the original command
+                     // Looks through the command's arguments to find the one starting with `gs://`.
+                     const gsPath = args.find(arg => arg.startsWith('gs://'));
+                     
+                     // 3. Set a default filename
+                     // A safety measure in case the real filename can't be found.
+                     let filename = 'file'; 
+                     
+                     // 4. Extract the filename from the path
+                     if (gsPath) {
+                         // a. Splits the path by the `/` character.
+                         const parts = gsPath.split('/');
+                         // b. Takes the very last item from that array, which is the filename.
+                         const lastPart = parts[parts.length - 1];
+                         // c. Assigns this filename to our `filename` variable, if it's not empty.
+                         if (lastPart) { 
+                             filename = lastPart;
+                         }
+                     }
+ 
+                     // 5. Create and return the final Markdown link
+                     // Constructs a Markdown string like "[Download your-file.docx](https://...)"
+                     // and sends it back to the AI agent as the result.
+                     resolve(`[Download ${filename}](${url})`);
+                 } else {
+                     resolve('Command executed successfully, but failed to extract the signed URL from the output.');
+                 }
+             } else if (stdout.trim() === '') {
+                 resolve("Command executed successfully and returned no output.");
+             } else {
+                 resolve(stdout);
+             }
+           } else {
+             resolve(`Error: Command failed with exit code ${code}. Stderr: ${stderr}`);
+           }
+         });
+     
+         child.on('error', (err) => {
+           resolve(`Failed to start the process: ${err.message}`);
+         });
+       });
+     }
+ }
+ 
+ export const googleCloudSdkTool = new GoogleCloudSDK();
