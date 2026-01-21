@@ -109,8 +109,8 @@
        return new Promise((resolve) => {
          let stdout = '';
          let stderr = '';
-
-        // Reverting to shell:true, which was the key difference in the working gcloud_tool_old.ts
+ 
+         // Reverting to shell:true, which was the key difference in the working gcloud_tool_old.ts
          const child = child_process.spawn(commandString, { env, shell: true });
      
          child.stdout.on('data', (data) => { stdout += data.toString(); });
