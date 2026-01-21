@@ -111,8 +111,9 @@
          let stderr = '';
  
          // Reverting to shell:true, which was the key difference in the working gcloud_tool_old.ts
-         const child = child_process.spawn(commandString, { env, shell: true });
-     
+         //const child = child_process.spawn(commandString, { env, shell: true });
+         //adding this line and commenting earlier one to fix the file name space issue with signed url generation
+         const child = child_process.spawn(tool, args, { env });        
          child.stdout.on('data', (data) => { stdout += data.toString(); });
          child.stderr.on('data', (data) => { stderr += data.toString(); });
      
