@@ -110,39 +110,14 @@
          let stdout = '';
          let stderr = '';
 
-        // --- START: User-suggested URL-encoding fix ---
-        let finalCommandString = commandString;
-        // We only perform this transformation for the specific failing case.
-        if (commandString.includes('gcloud storage sign-url') && commandString.includes('"gs://')) {
-            console.log('[GCLOUD_TOOL] Detected sign-url with spaces. Applying URL-encoding fix.');
-
-            // This regex finds the quoted "gs://..." path.
-            const gsPathRegex = /"gs:\/\/([^"]+)"/;
-            const match = commandString.match(gsPathRegex);
-
-            if (match && match[0] && match[1]) {
-                const fullQuotedPath = match[0]; // e.g., "gs://bucket/file with spaces.docx"
-                const innerPath = match[1];     // e.g., bucket/file with spaces.docx
-
-                // Replace spaces with %20 ONLY within the path.
-                const encodedInnerPath = innerPath.replace(/ /g, '%20');
-
-                // Rebuild the final command, replacing the quoted path with an unquoted, encoded one.
-                finalCommandString = commandString.replace(fullQuotedPath, `gs://${encodedInnerPath}`);
-                console.log(`[GCLOUD_TOOL] Transformed command string: ${finalCommandString}`);
-            }
-        }
-        // --- END: User-suggested URL-encoding fix ---
- 
- 
-         // Reverting to shell:true, which was the key difference in the working gcloud_tool_old.ts
-         const child = child_process.spawn(finalCommandString, { env, shell: true });
+        // Reverting to shell:true, which was the key difference in the working gcloud_tool_old.ts
+         const child = child_process.spawn(commandString, { env, shell: true });
      
          child.stdout.on('data', (data) => { stdout += data.toString(); });
          child.stderr.on('data', (data) => { stderr += data.toString(); });
      
          child.on('close', (code) => {
-           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Command: '${finalCommandString}'`);
+           console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Command: '${commandString}'`);
            console.log(`[GCLOUD_TOOL_DIAGNOSTICS] Exit Code: ${code}`);
            console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDOUT: ${stdout}`);
            console.log(`[GCLOUD_TOOL_DIAGNOSTICS] STDERR: ${stderr}`);
