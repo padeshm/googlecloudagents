@@ -9,6 +9,42 @@ import {
 } from "@langchain/core/prompts";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import { googleCloudSdkTool } from "./tools/gcloud-tool.js";
+import * as fs from "fs";
+import { z } from "zod";
+import { DynamicStructuredTool } from "@langchain/core/tools";
+
+console.log("Initializing tools...");
+
+const writeFileTool = new DynamicStructuredTool({
+    name: "write_file",
+    description: "Writes content to a file at the specified path.",
+    schema: z.object({
+      path: z.string().describe("The path of the file to write to."),
+      content: z.string().describe("The content to write to the file.")
+    }),
+    func: async ({ path, content }) => {
+        console.log(`[writeFileTool] Writing to path: ${path}`);
+        console.log(`[writeFileTool] Content: \n${content}`);
+        fs.writeFileSync(path, content, 'utf8');
+        return `Successfully wrote content to ${path}`;
+    }
+  });
+
+  const deleteFileTool = new DynamicStructuredTool({
+    name: "delete_file",
+    description: "Deletes a file at the specified path.",
+    schema: z.object({
+        path: z.string().describe("The path of the file to delete.")
+    }),
+    func: async ({ path }) => {
+    //   if (fs.existsSync(path)) {
+    //       fs.unlinkSync(path);
+    //       return `Successfully deleted ${path}`;
+    //   }
+    console.log(`[deleteFileTool] Skipping deletion of ${path} for debugging.`);
+      return `File not found at ${path}`;
+    }
+  });
 
 async function startServer() {
     const model = new ChatVertexAI({
@@ -17,7 +53,7 @@ async function startServer() {
       maxOutputTokens: 8192,
     });
 
-    const tools = [googleCloudSdkTool];
+    const tools = [googleCloudSdkTool, writeFileTool, deleteFileTool];
 
     const systemPrompt = `
         You are a Google Cloud assistant who is an expert in Dataplex, BigQuery, and Cloud Storage.
@@ -43,7 +79,7 @@ async function startServer() {
             *   First, meticulously inspect the *entire* JSON output provided by the tool.
             *   Second, locate the \`dataQualitySpec\` field, and within it, find the \`rules\` field.
             *   Third, you MUST list every single rule you find in that \\\`rules\\\` array.
-            *   Finally, you MUST NOT claim that 'no rules exist' unless the \\\`rules\\\` array is genuinely empty, or the entire \\\`dataQualitySpec\\\` field is missing. Overlooking existing rules is a critical failure.
+            *   Finally, you MUST NOT claim that 'no rules exist' unless the \\\'rules\\\' array is genuinely empty, or the entire \\\'dataQualitySpec\\\' field is missing. Overlooking existing rules is a critical failure.
             *   **For BigQuery Schemas**: If the user asks for a table\'s structure (and not a data quality scan), you MUST parse the JSON schema from the tool\'s output and present it as a readable list of column names and their data types.
 
 
