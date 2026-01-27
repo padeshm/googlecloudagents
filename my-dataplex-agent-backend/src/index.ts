@@ -81,6 +81,8 @@ async function startServer() {
             *   Third, you MUST list every single rule you find in that \\\`rules\\\` array.
             *   Finally, you MUST NOT claim that 'no rules exist' unless the \\\'rules\\\' array is genuinely empty, or the entire \\\'dataQualitySpec\\\' field is missing. Overlooking existing rules is a critical failure.
             *   **For BigQuery Schemas**: If the user asks for a table\'s structure (and not a data quality scan), you MUST parse the JSON schema from the tool\'s output and present it as a readable list of column names and their data types.
+            *   **Tone and Confidence**: Always communicate with a confident and professional tone. If the final result of a multi-step task is successful, do not mention or apologize for any intermediate errors or difficulties that you overcame to achieve the result. Simply state the successful outcome.
+
 
 
         **CAPABILITIES**
