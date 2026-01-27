@@ -121,9 +121,11 @@ async function startServer() {
                 1.  **Step 1 (Tool: run_terminal_command): Get the latest scan definition.**
                     *   Execute \`dataplex datascans describe <scan-id> --project=<project-id> --location=<location> --view=FULL\`. This provides the full JSON definition of the scan.
 
-                2.  **Step 2 (IN-MEMORY): Understand the user's request and build the new rule.**
-                    *   **Parse the request**: From the user's prompt (e.g., "add a uniqueness rule on the 'sku' column"), extract the structured intent: the column, the rule type, and any parameters.
-                    *   **Construct the JSON**: Build the new rule's JSON object using the exact mapping below. This is how you translate the user's request into a valid Dataplex rule.
+                2.  **Step 2 (IN-MEMORY): Understand the user's request and modify the rule.**
+                    *   **Parse the request**: Understand if the user wants to add, update, or delete a rule. From the user's prompt (e.g., "add a uniqueness rule on the 'sku' column"), extract the structured intent: the column, the rule type, and any parameters.
+                    *   **To Add/Update**: Construct the new rule's JSON object using the mappings below. Then, add it to the \`rules\` array from the scan definition. If a rule with the same name exists, replace it.
+                    *   **To Delete**: When the user asks to delete a rule, you MUST filter the existing \`rules\` array from the scan definition to create a new array that *excludes* the rule matching the user's description (e.g., by its name).
+                    *   **Rule Construction Mappings**: Build the new rule's JSON object using the exact mapping below. This is how you translate the user's request into a valid Dataplex rule.
                         *   \`nonNull\` -> \`{{ "dimension": "COMPLETENESS", "nonNullExpectation": {{}} }}\`
                         *   \`uniqueness\` -> \`{{ "dimension": "UNIQUENESS", "uniquenessExpectation": {{}} }}\`
                         *   \`range\` -> \`{{ "dimension": "VALIDITY", "rangeExpectation": {{ "minValue": "...", "maxValue": "..." }} }}\`
@@ -134,10 +136,10 @@ async function startServer() {
                 3.  **Step 3 (IN-MEMORY): Prepare the updated \`dataQualitySpec\`.**
                     *   Take the full JSON object from Step 1.
                     *   Extract the \`dataQualitySpec\` object. **If \`dataQualitySpec\` or its \`rules\` array does not exist, create them as empty JSON objects/arrays.**
-                    *   Modify the \`rules\` array within this object by adding your newly constructed rule from Step 2.
+                    *   Replace the existing \`rules\` array in this object with your modified array from Step 2.
 
                 4.  **Step 4 (Tool: write_file): Save the complete, modified \`dataQualitySpec\` to a temporary file.**
-                    *   The content written to the file MUST be the full \`dataQualitySpec\` object (including any existing rules plus the new one).
+                    *   The content written to the file MUST be the full \`dataQualitySpec\` object (with the modified rules).
                     *   Example: \`write_file(path='/tmp/updated_spec.json', content='<stringified-dataQualitySpec-object>')\`.
 
                 5.  **Step 5 (Tool: run_terminal_command): Execute the update using the file.**
